@@ -4,6 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { LineChart, ArrowLeft } from "lucide-react"
 import { Watchlist } from "./Watchlist"
+import { PriceChart } from "./PriceChart"
 
 export function FuturesDashboard() {
   const [activeSymbol, setActiveSymbol] = useState("BTCUSDT")
@@ -31,7 +32,7 @@ export function FuturesDashboard() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_1fr_300px]">
           <Watchlist activeSymbol={activeSymbol} onSelect={setActiveSymbol} />
           <div className="space-y-4">
-            <div id="dashboard-chart-slot" />
+            <PriceChart symbol={activeSymbol} />
             <div id="dashboard-orderbook-slot" />
           </div>
           <div className="space-y-4">
