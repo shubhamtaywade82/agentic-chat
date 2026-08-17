@@ -91,18 +91,25 @@ export function getToolSystemPrompt(enabledTools: Record<string, boolean>, custo
 ${tools.join("\n")}
 
 REACT INSTRUCTIONS:
-To answer the user's prompt, think step-by-step using this format:
+Always think step-by-step using this exact format:
 Plan:
-- Step 1
-- Step 2
+- Step 1: Description
+- Step 2: Description
 
 Thought: [Explain your reasoning]
-Action: [exact tool_name]
+Action: tool_name
 Action Input: {"param": "value"}
-(Wait for Observation from system)
 
-Thought: [Evaluate observation]
-Final Answer: [Your complete response formatted in rich GitHub-flavored Markdown. Use fenced code blocks (\`\`\`language) for code/JSON/HTML, markdown tables for tabular data, and lists/headers for structure.]`
+(When you receive the Observation from the system):
+Thought: [Evaluate the observation result]
+Final Answer: [Your complete response formatted in rich GitHub-flavored Markdown. Use fenced code blocks (\`\`\`language) for code/JSON/HTML, markdown tables for tabular data, and lists/headers.]
+
+EXAMPLE:
+Plan:
+- Step 1: Fetch live price
+Thought: I will fetch the live price using binance_price.
+Action: binance_price
+Action Input: {"symbol": "SOLUSDT"}`
 }
 
 // Math calculation helper
@@ -271,11 +278,15 @@ export async function executeLiveTool(
         return { summary: `Positions: ${Array.isArray(data) ? data.length : 0} open positions`, data }
       }
 
-      // Special normalization for NIFTY / Index lookups
+      // Special normalization for NIFTY / Index lookups and instruments map
       if (norm === "dhan_ltp" || norm === "dhan_quote" || norm === "dhan_ohlc") {
-        const secId = String(parsedArgs.securityId || parsedArgs.symbol || parsedArgs.underlyingSymbol || "13")
-        parsedArgs.securityId = secId === "NIFTY" ? "13" : secId
-        parsedArgs.exchangeSegment = String(parsedArgs.exchangeSegment || (parsedArgs.securityId === "13" ? "IDX_I" : "NSE_EQ"))
+        if (!parsedArgs.instruments) {
+          const rawSec = String(parsedArgs.securityId || parsedArgs.symbol || parsedArgs.underlyingSymbol || "13")
+          const isIndex = rawSec.toUpperCase() === "NIFTY" || rawSec.toUpperCase() === "BANKNIFTY" || rawSec === "13" || rawSec === "25"
+          const seg = String(parsedArgs.exchangeSegment || (isIndex ? "IDX_I" : "NSE_EQ"))
+          const secId = rawSec.toUpperCase() === "NIFTY" ? 13 : (rawSec.toUpperCase() === "BANKNIFTY" ? 25 : (!isNaN(Number(rawSec)) ? Number(rawSec) : rawSec))
+          parsedArgs.instruments = { [seg]: [secId] }
+        }
       }
 
       const resolvedName = (norm === "dhan_market_summary" || norm === "dhan_marketsummary")
@@ -284,6 +295,8 @@ export async function executeLiveTool(
 
       if (resolvedName === "dhan_skill_market_data_summarizer") {
         parsedArgs.underlyingSymbol = String(parsedArgs.underlyingSymbol || parsedArgs.symbol || parsedArgs.securityId || "NIFTY").toUpperCase()
+        if (parsedArgs.underlyingSymbol === "13") parsedArgs.underlyingSymbol = "NIFTY"
+        if (parsedArgs.underlyingSymbol === "25") parsedArgs.underlyingSymbol = "BANKNIFTY"
       }
 
       const toolDef = registry.find(resolvedName) || registry.find(toolName) || registry.find(norm)

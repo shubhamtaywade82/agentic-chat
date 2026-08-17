@@ -4,8 +4,17 @@ import type { AgentMessage, TraceStep } from "./agent-types"
 function formatStepMarkdown(step: TraceStep): string {
   const time = step.durationMs ? ` (${(step.durationMs / 1000).toFixed(1)}s)` : ""
   switch (step.kind) {
-    case "plan":
-      return `### 📋 Plan\n**Goal**: ${step.goal}\n\n${step.steps.map((s, i) => `${i + 1}. [${s.done ? "x" : " "}] ${s.text}`).join("\n")}\n`
+    case "plan": {
+      const stepsList = Array.isArray(step.steps) ? step.steps : []
+      const stepsText = stepsList
+        .map((s, i) => {
+          const text = typeof s === "string" ? s : s?.text || String(s)
+          const done = typeof s === "object" ? Boolean(s?.done) : false
+          return `${i + 1}. [${done ? "x" : " "}] ${text}`
+        })
+        .join("\n")
+      return `### 📋 Plan\n**Goal**: ${step.goal}\n\n${stepsText}\n`
+    }
     case "thinking":
       return `### 🧠 Thinking (Iteration ${step.iteration})${time}\n**${step.title}**\n\n${step.reasoning}\n`
     case "tool_call":

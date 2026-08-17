@@ -18,6 +18,29 @@ function isKnownTool(name: string, customTools: CustomTool[] = []): boolean {
   return false
 }
 
+function inferToolFromContext(text: string, args: Record<string, unknown>, customTools: CustomTool[] = []): string | null {
+  for (const c of customTools) {
+    if (new RegExp(`\\b${c.name}\\b`, "i").test(text)) return c.name
+  }
+  const known = [
+    "binance_price", "binance_24hr_ticker", "binance_klines", "binance_order_book",
+    "binance_funding_rate", "binance_open_interest", "binance_long_short_ratio",
+    "dhan_market_summary", "dhan_ltp", "dhan_quote", "dhan_holdings", "dhan_positions", "dhan_funds",
+    "calculator", "weather_api", "web_search", "code_interpreter"
+  ]
+  for (const k of known) {
+    if (new RegExp(`\\b${k}\\b`, "i").test(text)) return k
+  }
+  if (args.symbol || args.ticker) return "binance_price"
+  if (args.underlyingSymbol) return "dhan_market_summary"
+  if (args.securityId) return "dhan_ltp"
+  if (args.location || args.city) return "weather_api"
+  if (args.expression) return "calculator"
+  if (args.query) return "web_search"
+  if (args.code) return "code_interpreter"
+  return null
+}
+
 // Call LLM endpoint (Ollama, OpenAI, Groq, Custom) using chat completions protocol
 async function callLlm(
   messages: ChatMessage[],
@@ -60,23 +83,29 @@ async function callLlm(
 
 // Parses tool call action and action input from various LLM response formats
 function parseAction(text: string, customTools: CustomTool[] = []): { toolName: string; args: Record<string, unknown> } | null {
-  // 1. JSON object directly in Action line (e.g. Action: {"tool": "dhan_market_summary", ...})
+  // 1. JSON object directly in Action line (e.g. Action: {"tool": "binance_price", "symbol": "SOLUSDT"} or Action: {"symbol": "SOLUSDT"})
   const jsonActionMatch = text.match(/Action:\s*(\{[\s\S]*?\})/i) || text.match(/Action:\s*```(?:json)?\s*(\{[\s\S]*?\})\s*```/i)
   if (jsonActionMatch) {
     try {
       const obj = JSON.parse(jsonActionMatch[1])
-      const toolName = obj.tool || obj.name || obj.action || obj.tool_name || ""
+      let toolName = obj.tool || obj.name || obj.action || obj.tool_name || ""
+      const { tool: _t, name: _n, action: _a, tool_name: _tn, ...rest } = obj
+      const rawArgs = Object.keys(rest).length > 0 ? (rest.args || rest.parameters || rest.input || rest) : {}
+      const args = typeof rawArgs === "object" && rawArgs !== null ? rawArgs : { input: rawArgs }
+
+      if (!toolName) {
+        toolName = inferToolFromContext(text, args, customTools) || ""
+      }
+
       if (toolName && isKnownTool(toolName, customTools)) {
-        const { tool: _t, name: _n, action: _a, tool_name: _tn, ...rest } = obj
-        const args = Object.keys(rest).length > 0 ? (rest.args || rest.parameters || rest.input || rest) : {}
-        return { toolName, args: typeof args === "object" && args !== null ? args : { input: args } }
+        return { toolName, args }
       }
     } catch {
       // Continue to next parser
     }
   }
 
-  // 2. Standard or function syntax (e.g. Action: dhan_ltp({"securityId": "1333"}) or Action: dhan_ltp)
+  // 2. Standard or function syntax (e.g. Action: binance_price({"symbol": "SOLUSDT"}) or Action: binance_price)
   const stdMatch = text.match(/Action:\s*[`\[]?([a-zA-Z0-9_\-]+)[`\]]?(?:[\s\(]+(\{[\s\S]*?\})[\)]?)?/i)
   if (stdMatch) {
     const rawTool = stdMatch[1].trim()
@@ -111,6 +140,27 @@ function parseAction(text: string, customTools: CustomTool[] = []): { toolName: 
         }
       }
       return { toolName: rawTool, args: typeof args === "object" && args !== null ? args : { input: args } }
+    }
+  }
+
+  // 3. Natural language tool intent fallback (e.g. "I will fetch using binance_price with symbol 'SOLUSDT'")
+  const natMatch = text.match(/(?:using|calling|call|use)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)(?:[\s\S]*?(?:symbol|ticker|underlyingSymbol|query|location|code|securityId|expression)["\s:=]+([a-zA-Z0-9_\.\-]+))?/i)
+  if (natMatch) {
+    const rawTool = natMatch[1].toLowerCase().replace(/[^a-z0-9_]/g, "")
+    if (isKnownTool(rawTool, customTools)) {
+      const val = natMatch[2]?.replace(/^["'`]|["'`]$/g, "")
+      let args: Record<string, unknown> = {}
+      if (val) {
+        if (rawTool.includes("binance")) args = { symbol: val }
+        else if (rawTool.includes("dhan_market_summary")) args = { underlyingSymbol: val }
+        else if (rawTool.includes("dhan")) args = { securityId: val }
+        else if (rawTool.includes("weather")) args = { location: val }
+        else if (rawTool.includes("calc")) args = { expression: val }
+        else if (rawTool.includes("search")) args = { query: val }
+        else if (rawTool.includes("code")) args = { code: val }
+        else args = { input: val }
+      }
+      return { toolName: rawTool, args }
     }
   }
 
@@ -173,7 +223,7 @@ export async function POST(req: NextRequest) {
                 kind: "plan",
                 iteration: currentIteration,
                 goal: `Resolve request: "${query}"`,
-                steps: planSteps,
+                steps: planSteps.map((text, i) => ({ id: `step_${i + 1}`, text, done: false })),
               })
             }
           }
@@ -224,13 +274,26 @@ export async function POST(req: NextRequest) {
 
             currentIteration += 1
           } else {
-            const finalAnswer = extractFinalAnswer(content)
-            send({
-              kind: "answer",
-              iteration: currentIteration,
-              content: finalAnswer || content,
-            })
-            finalAnswerFound = true
+            const isOnlyPlanOrThought =
+              (content.trim().startsWith("Plan:") || content.trim().startsWith("Thought:")) &&
+              !/Final Answer:/i.test(content)
+
+            if (isOnlyPlanOrThought && currentIteration < maxIters) {
+              conversation.push({ role: "assistant", content })
+              conversation.push({
+                role: "user",
+                content: "Good. Now proceed with your next step: provide your Thought and Action (e.g. Action: tool_name) to call the tool.",
+              })
+              currentIteration += 1
+            } else {
+              const finalAnswer = extractFinalAnswer(content)
+              send({
+                kind: "answer",
+                iteration: currentIteration,
+                content: finalAnswer || content,
+              })
+              finalAnswerFound = true
+            }
           }
         }
 
