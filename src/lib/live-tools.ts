@@ -27,6 +27,34 @@ export function resolveBinanceClient(config?: BinanceConfig): InstanceType<typeo
   })
 }
 
+// Unwraps parsed arguments if wrapped in string or nested input field
+export function normalizeArgs(args: Record<string, unknown> | string): Record<string, unknown> {
+  let parsed: Record<string, unknown> = {}
+  if (typeof args === "string") {
+    try {
+      const p = JSON.parse(args)
+      parsed = typeof p === "object" && p !== null ? p : { input: args }
+    } catch {
+      parsed = { input: args }
+    }
+  } else if (typeof args === "object" && args !== null) {
+    parsed = { ...args }
+  }
+
+  if (typeof parsed.input === "string" && (parsed.input.startsWith("{") || parsed.input.startsWith("["))) {
+    try {
+      const nested = JSON.parse(parsed.input)
+      if (typeof nested === "object" && nested !== null) {
+        parsed = { ...parsed, ...nested }
+      }
+    } catch {
+      // keep
+    }
+  }
+
+  return parsed
+}
+
 // Returns structured instructions explaining available tools to the LLM
 export function getToolSystemPrompt(enabledTools: Record<string, boolean>, customTools: CustomTool[] = []): string {
   const tools: string[] = []
@@ -154,7 +182,7 @@ export async function executeLiveTool(
   binanceConfig?: BinanceConfig
 ): Promise<{ summary: string; data: unknown; error?: string }> {
   try {
-    const parsedArgs: Record<string, unknown> = typeof args === "object" && args !== null ? args : { input: args }
+    const parsedArgs: Record<string, unknown> = normalizeArgs(args)
     const getStr = (key: string, fallback = "") => String(parsedArgs[key] ?? parsedArgs.symbol ?? parsedArgs.input ?? fallback)
     const norm = toolName.toLowerCase().replace(/[^a-z0-9_]/g, "")
 
@@ -243,10 +271,25 @@ export async function executeLiveTool(
         return { summary: `Positions: ${Array.isArray(data) ? data.length : 0} open positions`, data }
       }
 
-      const toolDef = registry.find(toolName) || registry.find(norm)
+      // Special normalization for NIFTY / Index lookups
+      if (norm === "dhan_ltp" || norm === "dhan_quote" || norm === "dhan_ohlc") {
+        const secId = String(parsedArgs.securityId || parsedArgs.symbol || parsedArgs.underlyingSymbol || "13")
+        parsedArgs.securityId = secId === "NIFTY" ? "13" : secId
+        parsedArgs.exchangeSegment = String(parsedArgs.exchangeSegment || (parsedArgs.securityId === "13" ? "IDX_I" : "NSE_EQ"))
+      }
+
+      const resolvedName = (norm === "dhan_market_summary" || norm === "dhan_marketsummary")
+        ? "dhan_skill_market_data_summarizer"
+        : (norm === "dhan_historical" ? "dhan_historical_data" : (norm === "dhan_intraday" ? "dhan_intraday_data" : norm))
+
+      if (resolvedName === "dhan_skill_market_data_summarizer") {
+        parsedArgs.underlyingSymbol = String(parsedArgs.underlyingSymbol || parsedArgs.symbol || parsedArgs.securityId || "NIFTY").toUpperCase()
+      }
+
+      const toolDef = registry.find(resolvedName) || registry.find(toolName) || registry.find(norm)
       if (toolDef) {
         const result = await registry.execute(toolDef.name, parsedArgs)
-        return { summary: `Dhan ${toolDef.name} result`, data: result }
+        return { summary: `Dhan ${toolDef.name} executed`, data: result }
       }
     }
 

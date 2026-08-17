@@ -7,6 +7,17 @@ interface ChatMessage {
   content: string
 }
 
+const KNOWN_PREFIXES = ["binance_", "futures_", "dhan_"]
+const KNOWN_EXACT = ["calculator", "weather_api", "weather", "web_search", "search", "code_interpreter"]
+
+function isKnownTool(name: string, customTools: CustomTool[] = []): boolean {
+  const norm = name.toLowerCase().replace(/[^a-z0-9_]/g, "")
+  if (KNOWN_EXACT.includes(norm)) return true
+  if (KNOWN_PREFIXES.some((p) => norm.startsWith(p))) return true
+  if (customTools.some((c) => c.name.toLowerCase() === norm)) return true
+  return false
+}
+
 // Call LLM endpoint (Ollama, OpenAI, Groq, Custom) using chat completions protocol
 async function callLlm(
   messages: ChatMessage[],
@@ -47,33 +58,63 @@ async function callLlm(
   return { text, tokensIn, tokensOut }
 }
 
-// Parses tool call action and action input from LLM text
-function parseAction(text: string): { toolName: string; args: Record<string, unknown> } | null {
-  const actionMatch = text.match(/Action:\s*[`\[]?([a-zA-Z0-9_\-]+)[`\]]?(?:\(([\s\S]*?)\))?/i)
-  if (!actionMatch) return null
-
-  const toolName = actionMatch[1].trim()
-  let args: Record<string, unknown> = {}
-
-  if (actionMatch[2]) {
+// Parses tool call action and action input from various LLM response formats
+function parseAction(text: string, customTools: CustomTool[] = []): { toolName: string; args: Record<string, unknown> } | null {
+  // 1. JSON object directly in Action line (e.g. Action: {"tool": "dhan_market_summary", ...})
+  const jsonActionMatch = text.match(/Action:\s*(\{[\s\S]*?\})/i) || text.match(/Action:\s*```(?:json)?\s*(\{[\s\S]*?\})\s*```/i)
+  if (jsonActionMatch) {
     try {
-      args = JSON.parse(actionMatch[2])
-    } catch {
-      args = { input: actionMatch[2].replace(/^["']|["']$/g, "") }
-    }
-  } else {
-    const inputMatch = text.match(/Action Input:\s*(\{[\s\S]*?\}|\[[\s\S]*?\]|".*?"|[^\n]+)/i)
-    if (inputMatch) {
-      const rawInput = inputMatch[1].trim()
-      try {
-        args = JSON.parse(rawInput)
-      } catch {
-        args = { input: rawInput.replace(/^["']|["']$/g, "") }
+      const obj = JSON.parse(jsonActionMatch[1])
+      const toolName = obj.tool || obj.name || obj.action || obj.tool_name || ""
+      if (toolName && isKnownTool(toolName, customTools)) {
+        const { tool: _t, name: _n, action: _a, tool_name: _tn, ...rest } = obj
+        const args = Object.keys(rest).length > 0 ? (rest.args || rest.parameters || rest.input || rest) : {}
+        return { toolName, args: typeof args === "object" && args !== null ? args : { input: args } }
       }
+    } catch {
+      // Continue to next parser
     }
   }
 
-  return { toolName, args }
+  // 2. Standard or function syntax (e.g. Action: dhan_ltp({"securityId": "1333"}) or Action: dhan_ltp)
+  const stdMatch = text.match(/Action:\s*[`\[]?([a-zA-Z0-9_\-]+)[`\]]?(?:[\s\(]+(\{[\s\S]*?\})[\)]?)?/i)
+  if (stdMatch) {
+    const rawTool = stdMatch[1].trim()
+    if (isKnownTool(rawTool, customTools)) {
+      let args: Record<string, unknown> = {}
+      if (stdMatch[2]) {
+        try {
+          args = JSON.parse(stdMatch[2])
+        } catch {
+          args = { input: stdMatch[2].replace(/^["'`]|["'`]$/g, "") }
+        }
+      } else {
+        const inputMatch = text.match(/Action Input:\s*(\{[\s\S]*?\}|\[[\s\S]*?\]|".*?"|[^\n]+)/i)
+        if (inputMatch) {
+          const raw = inputMatch[1].trim()
+          try {
+            const parsed = JSON.parse(raw)
+            if (typeof parsed === "string") {
+              try {
+                args = JSON.parse(parsed)
+              } catch {
+                args = { input: parsed }
+              }
+            } else if (typeof parsed === "object" && parsed !== null) {
+              args = parsed
+            } else {
+              args = { input: parsed }
+            }
+          } catch {
+            args = { input: raw.replace(/^["'`]|["'`]$/g, "") }
+          }
+        }
+      }
+      return { toolName: rawTool, args: typeof args === "object" && args !== null ? args : { input: args } }
+    }
+  }
+
+  return null
 }
 
 // Parses high-level plan items if present in the LLM text
@@ -153,10 +194,9 @@ export async function POST(req: NextRequest) {
           }
 
           // Step 3: Check for Action vs Final Answer
-          const action = parseAction(content)
-          const hasAnswerMarker = /Final Answer:/i.test(content)
+          const action = parseAction(content, customTools)
 
-          if (action && !hasAnswerMarker) {
+          if (action) {
             send({
               kind: "tool_call",
               iteration: currentIteration,
@@ -179,7 +219,7 @@ export async function POST(req: NextRequest) {
             conversation.push({ role: "assistant", content })
             conversation.push({
               role: "user",
-              content: `Observation from ${action.toolName}:\n${JSON.stringify(toolResult.data, null, 2)}\n\nContinue with your next Thought and Action or provide your Final Answer formatted in rich Markdown.`,
+              content: `Observation from ${action.toolName}:\n${JSON.stringify(toolResult.data, null, 2)}\n\nNow review the observation above and produce your next Thought/Action, or give your Final Answer in rich Markdown.`,
             })
 
             currentIteration += 1
@@ -198,20 +238,20 @@ export async function POST(req: NextRequest) {
           send({
             kind: "answer",
             iteration: currentIteration,
-            content: `_Reached max configured ReAct iteration limit (${maxIters}). Summarizing findings gathered so far._`,
+            content: "The agent completed maximum allowed iterations. Please see the trace steps above.",
           })
         }
 
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+        controller.close()
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err)
         send({
           kind: "answer",
           iteration: 1,
-          content: `⚠️ **LLM Execution Error:**\n\n${errorMsg}\n\n*Tip: Check that **${config.provider}** is running and the model **\`${config.modelId}\`** is available.*`,
+          content: `⚠️ **Agent Error**: ${errorMsg}`,
         })
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))
-      } finally {
         controller.close()
       }
     },
@@ -219,8 +259,8 @@ export async function POST(req: NextRequest) {
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     },
   })
