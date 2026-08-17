@@ -6,6 +6,7 @@ import { AgentMessageView } from "./agent-message"
 import { UserMessageView } from "./user-message"
 import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
+import { AgentRuntimePanel } from "./agent-runtime-panel"
 import { AgentConfigDialog } from "./agent-config-dialog"
 import { LiveTickerBar } from "./live-ticker-bar"
 import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings } from "lucide-react"
@@ -133,6 +134,10 @@ export function AgentChat() {
           </div>
           <ChatInput />
         </main>
+
+        <aside className="hidden h-full w-[300px] shrink-0 overflow-hidden border-l border-border xl:block">
+          <AgentRuntimePanel />
+        </aside>
       </div>
 
       {/* Footer */}
