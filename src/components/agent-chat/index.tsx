@@ -6,8 +6,8 @@ import { AgentMessageView } from "./agent-message"
 import { UserMessageView } from "./user-message"
 import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
-import { AVAILABLE_MODELS } from "@/lib/agent-types"
-import { Bot, PanelLeft, PanelLeftOpen, Github, Zap } from "lucide-react"
+import { AgentConfigDialog } from "./agent-config-dialog"
+import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, PlayCircle, Sparkles, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,7 @@ export function AgentChat() {
   const isRunning = useAgentStore((s) => s.isRunning)
   const activeMessageId = useAgentStore((s) => s.activeMessageId)
   const config = useAgentStore((s) => s.config)
+  const clear = useAgentStore((s) => s.clear)
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -29,13 +30,25 @@ export function AgentChat() {
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [messages, activeMessageId, isRunning])
 
-  const activeModel = AVAILABLE_MODELS.find((m) => m.id === config.modelId) ?? AVAILABLE_MODELS[0]
+  const modeBadge =
+    config.executionMode === "live_tools" ? (
+      <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
+        <Zap className="h-2.5 w-2.5" /> Live Tools
+      </Badge>
+    ) : config.executionMode === "live_llm" ? (
+      <Badge variant="outline" className="gap-1 border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-400 font-mono text-[10px]">
+        <Sparkles className="h-2.5 w-2.5" /> Live LLM
+      </Badge>
+    ) : (
+      <Badge variant="secondary" className="gap-1 font-mono text-[10px]">
+        <PlayCircle className="h-2.5 w-2.5" /> Simulation
+      </Badge>
+    )
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
-      {/* ===== Header ===== */}
+      {/* Header */}
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        {/* mobile: opens Sheet sidebar */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" className="h-9 w-9 lg:hidden">
@@ -43,23 +56,16 @@ export function AgentChat() {
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-[300px] p-0">
-            <SheetTitle className="sr-only">Agent runtime panel</SheetTitle>
+            <SheetTitle className="sr-only">Agent runtime visualizer panel</SheetTitle>
             <SheetDescription className="sr-only">
-              ReAct loop visualization, session stats, and agent configuration
+              ReAct loop visualization, session telemetry, and sessions list
             </SheetDescription>
             <Sidebar onClose={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>
 
-        {/* desktop: expand collapsed sidebar */}
         {sidebarCollapsed && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="hidden h-9 w-9 lg:flex"
-            onClick={toggleSidebar}
-            title="Expand sidebar"
-          >
+          <Button variant="ghost" size="icon" className="hidden h-9 w-9 lg:flex" onClick={toggleSidebar} title="Expand sidebar">
             <PanelLeftOpen className="h-4 w-4" />
           </Button>
         )}
@@ -71,42 +77,43 @@ export function AgentChat() {
           <div className="leading-tight">
             <h1 className="text-sm font-semibold">ReAct Agent Playground</h1>
             <p className="hidden text-[10px] text-muted-foreground sm:block">
-              Visualize the reasoning · acting · observing loop
+              Live ReAct loop visualization · Reason · Act · Observe
             </p>
           </div>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <Badge variant="secondary" className="gap-1 font-mono text-[10px]" title="Active model (change in sidebar config)">
-            <Zap className="h-2.5 w-2.5 text-emerald-500" />
-            {activeModel.id}
-          </Badge>
-          <span className="hidden font-mono text-[10px] text-muted-foreground sm:inline" title="Temperature">
-            temp {config.temperature.toFixed(2)}
-          </span>
-          <Button variant="ghost" size="sm" className="hidden gap-1.5 text-muted-foreground sm:flex">
-            <Github className="h-3.5 w-3.5" />
-            Source
-          </Button>
+          {modeBadge}
+
+          {/* Settings Backdrop Trigger in Header */}
+          <AgentConfigDialog
+            trigger={
+              <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs font-mono">
+                <Settings className="h-3 w-3 text-muted-foreground" />
+                <span className="hidden sm:inline">{config.provider.replace(/_/g, " ")}:</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{config.modelId}</span>
+              </Button>
+            }
+          />
+
+          {messages.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={clear} className="h-7 gap-1 px-2 text-[10px] text-muted-foreground hover:text-destructive">
+              <Trash2 className="h-3 w-3" /> Clear
+            </Button>
+          )}
         </div>
       </header>
 
-      {/* ===== Body ===== */}
+      {/* Body */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* desktop sidebar — collapsible */}
         {!sidebarCollapsed && (
           <aside className="hidden h-full w-[300px] shrink-0 overflow-hidden border-r border-border lg:block">
             <Sidebar />
           </aside>
         )}
 
-        {/* chat column */}
         <main className="flex min-w-0 flex-1 flex-col">
-          {/* messages */}
-          <div
-            ref={scrollRef}
-            className="scroll-thin min-h-0 flex-1 overflow-y-auto"
-          >
+          <div ref={scrollRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
               {messages.length === 0 ? (
                 <EmptyState />
@@ -121,21 +128,17 @@ export function AgentChat() {
               )}
             </div>
           </div>
-
-          {/* input */}
           <ChatInput />
         </main>
       </div>
 
-      {/* ===== Footer ===== */}
+      {/* Footer */}
       <footer className="flex h-7 shrink-0 items-center justify-between border-t border-border bg-background px-4 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
           Agent runtime online
         </span>
-        <span className="font-mono">
-          ReAct = Reason + Act + Observe · loop until answer
-        </span>
+        <span className="font-mono">ReAct = Reason + Act + Observe · loop until answer</span>
       </footer>
     </div>
   )
@@ -152,8 +155,7 @@ function EmptyState() {
       </div>
       <h2 className="text-lg font-semibold">Start a conversation</h2>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-        Ask the agent anything. You'll see it think, call tools, observe results, and loop until it
-        reaches a final answer.
+        Ask the agent anything. You'll see it think, call tools (live or simulated), observe results, and loop until it reaches a final answer.
       </p>
     </div>
   )

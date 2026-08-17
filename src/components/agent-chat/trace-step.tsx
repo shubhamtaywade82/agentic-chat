@@ -189,11 +189,11 @@ function StepBody({
         </div>
       )
     case "plan":
-      return <PlanBody step={step} meta={meta} />
+      return <PlanBody step={step} meta={KIND_META.plan} />
     case "tool_call":
-      return <ToolCallBody step={step} meta={meta} />
+      return <ToolCallBody step={step} meta={KIND_META.tool_call} />
     case "observation":
-      return <ObservationBody step={step} meta={meta} />
+      return <ObservationBody step={step} meta={KIND_META.observation} />
     case "answer":
       return (
         <div className={cn("rounded-xl border p-4 shadow-sm", meta.border, meta.bg)}>
