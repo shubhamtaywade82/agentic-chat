@@ -120,6 +120,14 @@ export const DEFAULT_PROVIDER_URLS: Record<LlmProvider, string> = {
   custom: "",
 }
 
+export interface ProviderApiKey {
+  id: string
+  label: string
+  key: string
+  provider: LlmProvider
+  createdAt: number
+}
+
 export interface ModelOption {
   id: string
   label: string
@@ -147,6 +155,7 @@ export interface AgentConfig {
   enabledTools: Record<string, boolean>
   provider: LlmProvider
   apiKey: string
+  apiKeys: ProviderApiKey[]
   apiBaseUrl: string
   customTools: CustomTool[]
 }
@@ -176,6 +185,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   enabledTools: Object.fromEntries(AVAILABLE_TOOLS.map((t) => [t.name, true])),
   provider: "ollama_local",
   apiKey: "",
+  apiKeys: [],
   apiBaseUrl: "http://localhost:11434",
   customTools: [],
 }

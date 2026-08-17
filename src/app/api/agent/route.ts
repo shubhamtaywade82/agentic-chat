@@ -49,19 +49,27 @@ async function callLlm(
 
 // Parses tool call action and action input from LLM text
 function parseAction(text: string): { toolName: string; args: Record<string, unknown> } | null {
-  const actionMatch = text.match(/Action:\s*([a-zA-Z0-9_\-]+)/i)
+  const actionMatch = text.match(/Action:\s*[`\[]?([a-zA-Z0-9_\-]+)[`\]]?(?:\(([\s\S]*?)\))?/i)
   if (!actionMatch) return null
 
   const toolName = actionMatch[1].trim()
   let args: Record<string, unknown> = {}
 
-  const inputMatch = text.match(/Action Input:\s*(\{[\s\S]*?\}|\[[\s\S]*?\]|".*?"|[^\n]+)/i)
-  if (inputMatch) {
-    const rawInput = inputMatch[1].trim()
+  if (actionMatch[2]) {
     try {
-      args = JSON.parse(rawInput)
+      args = JSON.parse(actionMatch[2])
     } catch {
-      args = { input: rawInput.replace(/^["']|["']$/g, "") }
+      args = { input: actionMatch[2].replace(/^["']|["']$/g, "") }
+    }
+  } else {
+    const inputMatch = text.match(/Action Input:\s*(\{[\s\S]*?\}|\[[\s\S]*?\]|".*?"|[^\n]+)/i)
+    if (inputMatch) {
+      const rawInput = inputMatch[1].trim()
+      try {
+        args = JSON.parse(rawInput)
+      } catch {
+        args = { input: rawInput.replace(/^["']|["']$/g, "") }
+      }
     }
   }
 

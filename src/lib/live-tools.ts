@@ -4,16 +4,16 @@ import type { CustomTool } from "./agent-types"
 export function getToolSystemPrompt(enabledTools: Record<string, boolean>, customTools: CustomTool[] = []): string {
   const tools: string[] = []
   if (enabledTools.calculator !== false) {
-    tools.push(`- calculator: {"expression": "string"} // Evaluate mathematical expressions (e.g. "15 * 23 + 47", "sqrt(144)")`)
+    tools.push(`- calculator: {"expression": "string"} // Evaluate mathematical expressions (e.g. {"expression": "45 * 18 + 120"})`)
   }
   if (enabledTools.weather_api !== false) {
-    tools.push(`- weather_api: {"location": "string"} // Get real-time weather & forecast for any city`)
+    tools.push(`- weather_api: {"location": "string"} // Get real-time weather & forecast for any city (e.g. {"location": "Tokyo"})`)
   }
   if (enabledTools.web_search !== false) {
     tools.push(`- web_search: {"query": "string"} // Search Wikipedia and web for live facts and news`)
   }
   if (enabledTools.code_interpreter !== false) {
-    tools.push(`- code_interpreter: {"code": "string", "language": "javascript"} // Execute sandbox JavaScript code`)
+    tools.push(`- code_interpreter: {"code": "string"} // Execute sandbox JavaScript code`)
   }
   for (const c of customTools) {
     if (c.enabled) {
@@ -24,19 +24,19 @@ export function getToolSystemPrompt(enabledTools: Record<string, boolean>, custo
   return `AVAILABLE TOOLS:
 ${tools.join("\n")}
 
-REACT FORMAT PROTOCOL:
-When reasoning and using tools, use the following exact format:
+REACT INSTRUCTIONS:
+To answer the user's prompt, think step-by-step using this format:
 Plan:
 - Step 1
 - Step 2
 
-Thought: [Your step-by-step reasoning]
-Action: [tool_name]
+Thought: [Explain your reasoning]
+Action: [exact tool_name]
 Action Input: {"param": "value"}
-(After receiving Observation, continue your Thought or provide Final Answer)
+(Wait for Observation from system)
 
-Thought: [Reflect on observation]
-Final Answer: [Your complete response to the user]`
+Thought: [Evaluate observation]
+Final Answer: [Your final response to user]`
 }
 
 // Safe math evaluator using Function with sanitized math tokens
@@ -183,34 +183,46 @@ export async function executeCustomTool(tool: CustomTool, args: Record<string, u
 // Unified dispatcher for live tool execution
 export async function executeLiveTool(
   toolName: string,
-  args: Record<string, unknown>,
+  args: Record<string, unknown> | string,
   customTools: CustomTool[] = []
 ): Promise<{ summary: string; data: unknown; error?: string }> {
   try {
+    const getArgString = (key: string, fallback = ""): string => {
+      if (typeof args === "string") return args
+      if (typeof args === "object" && args !== null) {
+        const val = args[key] ?? args.input ?? args.query ?? args.expression ?? args.location ?? args.code
+        return val !== undefined ? String(val) : fallback
+      }
+      return fallback
+    }
+
     const custom = customTools.find((t) => t.name === toolName)
     if (custom) {
-      const data = await executeCustomTool(custom, args)
+      const parsedArgs = typeof args === "object" && args !== null ? args : { input: args }
+      const data = await executeCustomTool(custom, parsedArgs)
       return { summary: `Executed custom tool: ${toolName}`, data }
     }
 
-    switch (toolName) {
+    switch (toolName.toLowerCase().replace(/[^a-z0-9_]/g, "")) {
       case "calculator": {
-        const expr = String(args.expression || args.query || args.input || "0")
+        const expr = getArgString("expression", "0")
         const data = executeCalculator(expr)
         return { summary: `Calculated ${expr} = ${data.result}`, data }
       }
-      case "weather_api": {
-        const loc = String(args.location || args.city || "San Francisco")
+      case "weather_api":
+      case "weather": {
+        const loc = getArgString("location", "Tokyo")
         const data = await executeWeather(loc)
         return { summary: `Current conditions for ${data.location}`, data }
       }
-      case "web_search": {
-        const query = String(args.query || args.search || "")
+      case "web_search":
+      case "search": {
+        const query = getArgString("query", "")
         const data = await executeWebSearch(query)
         return { summary: `${data.total} web results retrieved for "${query}"`, data }
       }
       case "code_interpreter": {
-        const code = String(args.code || "")
+        const code = getArgString("code", "")
         const data = executeCodeInterpreter(code)
         return { summary: data.exit_code === 0 ? "Execution completed successfully" : "Execution returned error", data }
       }

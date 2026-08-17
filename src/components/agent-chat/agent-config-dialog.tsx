@@ -6,8 +6,8 @@ import {
 } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
-  Settings, Cpu, Terminal, Wrench, Globe, RotateCcw,
-  Sliders, Check, Trash2, Server, Cloud, Zap, Sparkles, RefreshCw, Loader2
+  Settings, Cpu, Terminal, Wrench, RotateCcw,
+  Sliders, Check, Trash2, Server, Cloud, Zap, Sparkles, RefreshCw, Loader2, KeyRound, Plus, ShieldCheck
 } from "lucide-react"
 import { useAgentStore } from "@/store/agent-store"
 import { AVAILABLE_TOOLS, DEFAULT_PROVIDER_URLS, LlmProvider } from "@/lib/agent-types"
@@ -24,12 +24,32 @@ import { cn } from "@/lib/utils"
 
 export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
   const [open, setOpen] = useState(false)
-  const { config, updateConfig, toggleTool, saveCustomTool, deleteCustomTool, toggleCustomTool, resetConfig, isRunning, models, isLoadingModels, isLiveModels, loadModels } = useAgentStore()
+  const [newKeyLabel, setNewKeyLabel] = useState("")
+  const [newKeyValue, setNewKeyValue] = useState("")
+  const [showAddKey, setShowAddKey] = useState(false)
+
+  const {
+    config, updateConfig, addApiKey, removeApiKey, toggleTool,
+    saveCustomTool, deleteCustomTool, toggleCustomTool, resetConfig,
+    isRunning, models, isLoadingModels, isLiveModels, loadModels
+  } = useAgentStore()
+
+  const isLocalOllama = config.provider === "ollama_local"
+  const currentProviderKeys = (config.apiKeys || []).filter((k) => k.provider === config.provider)
 
   const handleProviderChange = (provider: LlmProvider) => {
     const defaultUrl = DEFAULT_PROVIDER_URLS[provider] || ""
-    updateConfig({ provider, apiBaseUrl: defaultUrl })
-    loadModels(provider, defaultUrl, config.apiKey)
+    const matchingKey = (config.apiKeys || []).find((k) => k.provider === provider)?.key || ""
+    updateConfig({ provider, apiBaseUrl: defaultUrl, apiKey: matchingKey })
+    loadModels(provider, defaultUrl, matchingKey)
+  }
+
+  const handleSaveNewKey = () => {
+    if (!newKeyValue.trim()) return
+    addApiKey(newKeyValue.trim(), newKeyLabel.trim())
+    setNewKeyValue("")
+    setNewKeyLabel("")
+    setShowAddKey(false)
   }
 
   return (
@@ -44,7 +64,6 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
       </DialogTrigger>
 
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col p-0 bg-background border border-border shadow-2xl backdrop-blur-xl">
-        {/* Header */}
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-border bg-card/40">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -54,7 +73,7 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
               <div>
                 <DialogTitle className="text-base font-semibold">Agent Configuration</DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  Connect real LLMs (Ollama Local/Cloud, OpenAI, Groq, Anthropic, Gemini) with live ReAct tools.
+                  Real LLM providers (Ollama Local/Cloud, OpenAI, Groq) with live ReAct tools.
                 </DialogDescription>
               </div>
             </div>
@@ -64,24 +83,16 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
           </div>
         </DialogHeader>
 
-        {/* Tabbed Content */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           <Tabs defaultValue="providers" className="w-full">
             <TabsList className="grid w-full grid-cols-3 mb-4">
-              <TabsTrigger value="providers" className="text-xs gap-1.5">
-                <Server className="h-3.5 w-3.5" /> Provider & Models
-              </TabsTrigger>
-              <TabsTrigger value="parameters" className="text-xs gap-1.5">
-                <Sliders className="h-3.5 w-3.5" /> Persona & Loop
-              </TabsTrigger>
-              <TabsTrigger value="tools" className="text-xs gap-1.5">
-                <Wrench className="h-3.5 w-3.5" /> Tools & Extensions
-              </TabsTrigger>
+              <TabsTrigger value="providers" className="text-xs gap-1.5"><Server className="h-3.5 w-3.5" /> Provider & Models</TabsTrigger>
+              <TabsTrigger value="parameters" className="text-xs gap-1.5"><Sliders className="h-3.5 w-3.5" /> Persona & Loop</TabsTrigger>
+              <TabsTrigger value="tools" className="text-xs gap-1.5"><Wrench className="h-3.5 w-3.5" /> Tools & Extensions</TabsTrigger>
             </TabsList>
 
-            {/* TAB 1: Providers & Dynamic Models */}
+            {/* TAB 1: Providers, Endpoints & Multi-Keys */}
             <TabsContent value="providers" className="space-y-4">
-              {/* Provider Selection */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">LLM Provider</Label>
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -92,7 +103,7 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
                     { id: "anthropic", label: "Anthropic", icon: Cpu },
                     { id: "gemini", label: "Google Gemini", icon: Sparkles },
                     { id: "groq", label: "Groq Cloud", icon: Zap },
-                    { id: "custom", label: "Custom / Proxy", icon: Globe },
+                    { id: "custom", label: "Custom Proxy", icon: Server },
                   ].map((p) => (
                     <button
                       key={p.id}
@@ -112,7 +123,7 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
                 </div>
               </div>
 
-              {/* Endpoint & Dynamic Model Selector */}
+              {/* Endpoint & Model */}
               <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -130,35 +141,76 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <Label className="text-xs font-medium">Model</Label>
-                      {isLiveModels && <Badge variant="outline" className="text-[8px] px-1 py-0 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-mono">Live from Provider</Badge>}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label className="text-xs font-medium">Model (Embedding models filtered out)</Label>
+                    {isLiveModels && <Badge variant="outline" className="text-[8px] px-1 py-0 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-mono">Live from Provider</Badge>}
+                  </div>
+                  <Select value={config.modelId} onValueChange={(v) => updateConfig({ modelId: v })} disabled={isRunning || isLoadingModels}>
+                    <SelectTrigger className="h-8 w-full font-mono text-xs"><SelectValue placeholder="Select model..." /></SelectTrigger>
+                    <SelectContent>
+                      {models.map((m) => (
+                        <SelectItem key={m.id} value={m.id} className="text-xs font-mono">{m.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* API Key Section */}
+                <div className="pt-1 border-t border-border/60">
+                  {isLocalOllama ? (
+                    <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs">
+                      <ShieldCheck className="h-4 w-4 shrink-0" />
+                      <span>Local Ollama instances do not require an API key.</span>
                     </div>
-                    <Select value={config.modelId} onValueChange={(v) => updateConfig({ modelId: v })} disabled={isRunning || isLoadingModels}>
-                      <SelectTrigger className="h-8 w-full font-mono text-xs">
-                        <SelectValue placeholder="Select model..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {models.map((m) => (
-                          <SelectItem key={m.id} value={m.id} className="text-xs font-mono">
-                            {m.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium mb-1 block">API Key (if required)</Label>
-                    <Input
-                      type="password"
-                      value={config.apiKey || ""}
-                      onChange={(e) => updateConfig({ apiKey: e.target.value })}
-                      placeholder={config.provider === "ollama_local" ? "Not needed for local" : "sk-..."}
-                      className="h-8 text-xs"
-                    />
-                  </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-medium flex items-center gap-1.5">
+                          <KeyRound className="h-3.5 w-3.5 text-emerald-500" /> Multiple API Keys ({currentProviderKeys.length} saved)
+                        </Label>
+                        <Button variant="ghost" size="sm" onClick={() => setShowAddKey(!showAddKey)} className="h-5 text-[10px] px-1.5 text-emerald-600 dark:text-emerald-400 gap-1">
+                          <Plus className="h-2.5 w-2.5" /> {showAddKey ? "Cancel" : "Add Key"}
+                        </Button>
+                      </div>
+
+                      {showAddKey && (
+                        <div className="p-2.5 rounded-lg border border-border bg-card/60 space-y-2">
+                          <Input value={newKeyLabel} onChange={(e) => setNewKeyLabel(e.target.value)} placeholder="Key Label (e.g. Primary Cloud, Backup)" className="h-7 text-xs" />
+                          <Input type="password" value={newKeyValue} onChange={(e) => setNewKeyValue(e.target.value)} placeholder="Enter API Key / Token" className="h-7 text-xs" />
+                          <Button size="sm" onClick={handleSaveNewKey} disabled={!newKeyValue.trim()} className="h-6 text-[10px] gap-1">
+                            <Check className="h-2.5 w-2.5" /> Save API Key
+                          </Button>
+                        </div>
+                      )}
+
+                      {currentProviderKeys.length > 0 ? (
+                        <div className="space-y-1">
+                          {currentProviderKeys.map((k) => (
+                            <div key={k.id} className={cn("flex items-center justify-between p-1.5 rounded-md border text-xs", config.apiKey === k.key ? "border-emerald-500/40 bg-emerald-500/5 font-medium" : "border-border bg-card/40")}>
+                              <span className="truncate max-w-[240px] text-[11px]">{k.label} ({k.key.slice(0, 6)}...{k.key.slice(-4)})</span>
+                              <div className="flex items-center gap-1">
+                                <Button variant="ghost" size="sm" onClick={() => updateConfig({ apiKey: k.key })} className={cn("h-5 text-[9px] px-1.5", config.apiKey === k.key && "text-emerald-600 dark:text-emerald-400 font-bold")}>
+                                  {config.apiKey === k.key ? "Active" : "Use"}
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => removeApiKey(k.id)} className="h-5 w-5 text-muted-foreground hover:text-destructive">
+                                  <Trash2 className="h-2.5 w-2.5" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <Input
+                          type="password"
+                          value={config.apiKey || ""}
+                          onChange={(e) => updateConfig({ apiKey: e.target.value })}
+                          placeholder="Enter API Key (sk-...)"
+                          className="h-8 text-xs"
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </TabsContent>
@@ -169,15 +221,8 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
                 <Label className="text-xs font-semibold flex items-center gap-1.5 mb-1.5">
                   <Terminal className="h-3.5 w-3.5 text-emerald-500" /> System Persona & Instructions
                 </Label>
-                <Textarea
-                  value={config.systemPrompt}
-                  onChange={(e) => updateConfig({ systemPrompt: e.target.value })}
-                  disabled={isRunning}
-                  className="min-h-[120px] font-mono text-xs leading-relaxed"
-                  placeholder="Define persona..."
-                />
+                <Textarea value={config.systemPrompt} onChange={(e) => updateConfig({ systemPrompt: e.target.value })} disabled={isRunning} className="min-h-[120px] font-mono text-xs leading-relaxed" placeholder="Define persona..." />
               </div>
-
               <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
                 <SliderRow label="Temperature" value={config.temperature.toFixed(2)} min={0} max={1} step={0.05} onChange={(v) => updateConfig({ temperature: v })} sub="0 = Precise, 1 = Creative" />
                 <SliderRow label="Max ReAct Iterations" value={String(config.maxIterations)} min={1} max={10} step={1} onChange={(v) => updateConfig({ maxIterations: v })} sub="Caps the Reason-Act loop" />
@@ -185,30 +230,25 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
               </div>
             </TabsContent>
 
-            {/* TAB 3: Tools & Custom Tool Builder */}
+            {/* TAB 3: Tools & Custom Tool Extensions */}
             <TabsContent value="tools" className="space-y-4">
               <div>
                 <Label className="text-xs font-semibold mb-2 block">Built-in Live Tools</Label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {AVAILABLE_TOOLS.map((t) => {
-                    const enabled = config.enabledTools[t.name] !== false
-                    return (
-                      <div key={t.name} className="flex items-center justify-between p-2 rounded-lg border border-border bg-card/60 text-xs">
-                        <div className="min-w-0 flex-1 mr-2">
-                          <p className="font-mono font-medium text-[11px]">{t.name}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">{t.description}</p>
-                        </div>
-                        <Switch checked={enabled} onCheckedChange={() => toggleTool(t.name)} disabled={isRunning} className="scale-75" />
+                  {AVAILABLE_TOOLS.map((t) => (
+                    <div key={t.name} className="flex items-center justify-between p-2 rounded-lg border border-border bg-card/60 text-xs">
+                      <div className="min-w-0 flex-1 mr-2">
+                        <p className="font-mono font-medium text-[11px]">{t.name}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">{t.description}</p>
                       </div>
-                    )
-                  })}
+                      <Switch checked={config.enabledTools[t.name] !== false} onCheckedChange={() => toggleTool(t.name)} disabled={isRunning} className="scale-75" />
+                    </div>
+                  ))}
                 </div>
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <Label className="text-xs font-semibold">Custom Tool Extensions</Label>
-                </div>
+                <Label className="text-xs font-semibold mb-2 block">Custom Tool Extensions</Label>
                 {(config.customTools || []).length > 0 && (
                   <div className="space-y-1.5 mb-3">
                     {config.customTools.map((ct) => (
@@ -233,7 +273,6 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
           </Tabs>
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-3 border-t border-border bg-card/40 flex justify-end">
           <Button size="sm" onClick={() => setOpen(false)} className="gap-1.5 text-xs">
             <Check className="h-3.5 w-3.5" /> Save & Close

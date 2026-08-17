@@ -1,7 +1,7 @@
 "use client"
 
 import { create } from "zustand"
-import type { AgentConfig, AgentMessage, ChatSession, CustomTool, LlmProvider, ModelOption, TraceStep } from "@/lib/agent-types"
+import type { AgentConfig, AgentMessage, ChatSession, CustomTool, LlmProvider, ModelOption, ProviderApiKey, TraceStep } from "@/lib/agent-types"
 import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
 
@@ -26,6 +26,8 @@ interface AgentState {
   sendUserMessage: (text: string) => Promise<void>
   setSpeed: (s: number) => void
   updateConfig: (partial: Partial<AgentConfig>) => void
+  addApiKey: (key: string, label: string) => void
+  removeApiKey: (id: string) => void
   toggleTool: (name: string) => void
   saveCustomTool: (tool: CustomTool) => void
   deleteCustomTool: (id: string) => void
@@ -62,7 +64,7 @@ const initialWelcomeMessage: AgentMessage = {
       startedAt: Date.now(),
       finishedAt: Date.now(),
       content:
-        "👋 Welcome to the **Agentic ReAct Runtime**.\n\nConnected directly to real LLM providers (**Ollama Local**, **Ollama Cloud**, **OpenAI**, **Groq**, etc.) with live tool execution.\n\n- **Live Tools**: Real Open-Meteo weather API, math evaluator, Wikipedia live search, and sandbox code interpreter.\n- **Autonomous ReAct**: Real-time Reason → Act → Observe execution cycles streamed from your configured model.\n- **Settings**: Click **Configure Agent** in the header to switch models, endpoints, or add custom tools.",
+        "👋 Welcome to the **Agentic ReAct Runtime**.\n\nConnected directly to real LLM providers (**Ollama Local**, **Ollama Cloud**, **OpenAI**, **Groq**, etc.) with live tool execution.\n\n- **Ollama Local**: Zero API key needed.\n- **Ollama Cloud & Cloud Providers**: Multiple API key management.\n- **Filtered Models**: Clean list of chat models with embedding models excluded.",
     },
   ],
 }
@@ -75,11 +77,11 @@ function loadSavedState(): { sessions: ChatSession[]; config: AgentConfig } {
     }
   }
   try {
-    const savedSessions = localStorage.getItem(STORAGE_KEY)
-    const savedConfig = localStorage.getItem(CONFIG_KEY)
+    const s = localStorage.getItem(STORAGE_KEY)
+    const c = localStorage.getItem(CONFIG_KEY)
     return {
-      sessions: savedSessions ? JSON.parse(savedSessions) : [{ id: initialSessionId, title: "Initial Session", createdAt: Date.now(), updatedAt: Date.now(), messages: [initialWelcomeMessage] }],
-      config: savedConfig ? { ...DEFAULT_CONFIG, ...JSON.parse(savedConfig) } : DEFAULT_CONFIG,
+      sessions: s ? JSON.parse(s) : [{ id: initialSessionId, title: "Initial Session", createdAt: Date.now(), updatedAt: Date.now(), messages: [initialWelcomeMessage] }],
+      config: c ? { ...DEFAULT_CONFIG, ...JSON.parse(c) } : DEFAULT_CONFIG,
     }
   } catch {
     return {
@@ -121,9 +123,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         const nextModel = hasCurrent ? currentModel : fetchedList[0]?.id || currentModel
 
         set({ models: fetchedList, isLiveModels: Boolean(data.isLive), isLoadingModels: false })
-        if (nextModel !== currentModel) {
-          get().updateConfig({ modelId: nextModel })
-        }
+        if (nextModel !== currentModel) get().updateConfig({ modelId: nextModel })
         return
       }
     } catch {
@@ -142,21 +142,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (typeof window !== "undefined") localStorage.setItem(CONFIG_KEY, JSON.stringify(nextConfig))
       return { config: nextConfig }
     })
-
     if (partial.provider || partial.apiBaseUrl !== undefined || partial.apiKey !== undefined) {
       get().loadModels(partial.provider, partial.apiBaseUrl, partial.apiKey)
     }
   },
 
+  addApiKey: (key, label) => {
+    const newKey: ProviderApiKey = { id: `key_${Date.now()}`, label: label || `Key (${get().config.provider})`, key, provider: get().config.provider, createdAt: Date.now() }
+    const updated = [...(get().config.apiKeys || []), newKey]
+    get().updateConfig({ apiKeys: updated, apiKey: key })
+  },
+
+  removeApiKey: (id) => {
+    const updated = (get().config.apiKeys || []).filter((k) => k.id !== id)
+    const activeKey = get().config.apiKey === id ? updated[0]?.key || "" : get().config.apiKey
+    get().updateConfig({ apiKeys: updated, apiKey: activeKey })
+  },
+
   toggleTool: (name) => {
-    get().updateConfig({
-      enabledTools: { ...get().config.enabledTools, [name]: get().config.enabledTools[name] === false ? true : false },
-    })
+    get().updateConfig({ enabledTools: { ...get().config.enabledTools, [name]: get().config.enabledTools[name] === false } })
   },
 
   saveCustomTool: (tool) => {
-    const existing = get().config.customTools || []
-    const updated = [...existing.filter((t) => t.id !== tool.id), tool]
+    const updated = [...(get().config.customTools || []).filter((t) => t.id !== tool.id), tool]
     get().updateConfig({ customTools: updated })
   },
 
@@ -207,20 +215,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   exportTrace: (messageId, format) => {
     const msg = get().messages.find((m) => m.id === messageId)
     if (!msg) return
-    if (format === "md") {
-      const md = exportTraceToMarkdown(msg)
-      downloadFile(`react-trace-${msg.id}.md`, md, "text/markdown")
-    } else {
-      const json = exportTraceToJson(msg)
-      downloadFile(`react-trace-${msg.id}.json`, json, "application/json")
-    }
+    if (format === "md") downloadFile(`react-trace-${msg.id}.md`, exportTraceToMarkdown(msg), "text/markdown")
+    else downloadFile(`react-trace-${msg.id}.json`, exportTraceToJson(msg), "application/json")
   },
 
   clear: () => {
     set((s) => {
-      const updatedSessions = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, messages: [] } : sess))
-      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSessions))
-      return { messages: [], isRunning: false, activeMessageId: null, sessions: updatedSessions }
+      const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, messages: [] } : sess))
+      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      return { messages: [], isRunning: false, activeMessageId: null, sessions: updated }
     })
   },
 
@@ -230,34 +233,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
     const agentMsgId = `a_${Date.now()}`
     const agentMsg: AgentMessage = {
-      id: agentMsgId,
-      role: "agent",
-      query: text,
-      trace: [],
-      status: "running",
-      startedAt: Date.now(),
-      iterations: 0,
-      totalTokens: 0,
-      modelId: config.modelId,
-      systemPrompt: config.systemPrompt,
-      temperature: config.temperature,
-      maxIterations: config.maxIterations,
-      provider: config.provider,
+      id: agentMsgId, role: "agent", query: text, trace: [], status: "running", startedAt: Date.now(),
+      iterations: 0, totalTokens: 0, modelId: config.modelId, systemPrompt: config.systemPrompt,
+      temperature: config.temperature, maxIterations: config.maxIterations, provider: config.provider,
     }
 
-    const updatedMessages = [...get().messages, userMsg, agentMsg]
-    set({ messages: updatedMessages, isRunning: true, activeMessageId: agentMsgId })
+    set({ messages: [...get().messages, userMsg, agentMsg], isRunning: true, activeMessageId: agentMsgId })
 
     try {
       const res = await fetch("/api/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: text, config, customTools: config.customTools }),
       })
-
-      if (!res.ok || !res.body) {
-        throw new Error(`API error (${res.status}): ${await res.text()}`)
-      }
+      if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -282,24 +270,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             const parsed = JSON.parse(rawData)
             const stepId = `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
             currentIter = parsed.iteration || currentIter
-            tokens += parsed.tokensIn || parsed.tokensOut ? (parsed.tokensIn || 0) + (parsed.tokensOut || 0) : 30
+            tokens += (parsed.tokensIn || 0) + (parsed.tokensOut || 0) || 30
 
             const step: TraceStep = {
-              ...parsed,
-              id: stepId,
-              status: "completed",
-              iteration: currentIter,
-              startedAt: Date.now(),
-              finishedAt: Date.now(),
-              durationMs: 400,
+              ...parsed, id: stepId, status: "completed", iteration: currentIter,
+              startedAt: Date.now(), finishedAt: Date.now(), durationMs: 400,
             }
-
             set((s) => ({
-              messages: s.messages.map((m) =>
-                m.id === agentMsgId
-                  ? { ...m, trace: [...(m.trace ?? []), step], iterations: currentIter, totalTokens: tokens }
-                  : m
-              ),
+              messages: s.messages.map((m) => m.id === agentMsgId ? { ...m, trace: [...(m.trace ?? []), step], iterations: currentIter, totalTokens: tokens } : m),
             }))
           } catch {
             // Ignore parse errors on split packets
@@ -309,17 +287,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err)
       const errorStep: TraceStep = {
-        id: `err_${Date.now()}`,
-        kind: "answer",
-        status: "error",
-        iteration: 1,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
+        id: `err_${Date.now()}`, kind: "answer", status: "error", iteration: 1, startedAt: Date.now(), finishedAt: Date.now(),
         content: `⚠️ **Connection Error:** ${errorMsg}\n\nEnsure provider **${config.provider}** is running.`,
       }
-      set((s) => ({
-        messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, trace: [...(m.trace ?? []), errorStep] } : m)),
-      }))
+      set((s) => ({ messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, trace: [...(m.trace ?? []), errorStep] } : m)) }))
     }
 
     set((s) => {
