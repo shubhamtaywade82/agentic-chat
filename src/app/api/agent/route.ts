@@ -247,9 +247,18 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // Step 2: Extract reasoning/thought
+          // Step 2: Check for Action, and extract reasoning/thought
+          const action = parseAction(content, customTools)
           const thoughtMatch = content.match(/Thought:\s*([\s\S]*?)(?=Action:|Final Answer:|$)/i)
-          const thoughtText = thoughtMatch ? thoughtMatch[1].trim() : content.replace(/Final Answer:[\s\S]*/i, "").trim()
+          const hasFinalAnswerLabel = /Final Answer:/i.test(content)
+          // Only synthesize a thought from the raw content when the model actually left something
+          // preceding an Action or Final Answer — otherwise content IS the final answer, and showing
+          // it again as "thinking" just duplicates the same text in two bubbles.
+          const thoughtText = thoughtMatch
+            ? thoughtMatch[1].trim()
+            : action || hasFinalAnswerLabel
+              ? content.replace(/Final Answer:[\s\S]*/i, "").trim()
+              : ""
 
           if (thoughtText) {
             send({
@@ -263,7 +272,6 @@ export async function POST(req: NextRequest) {
           }
 
           // Step 3: Check for Action vs Final Answer
-          const action = parseAction(content, customTools)
 
           if (action) {
             send({
@@ -310,7 +318,7 @@ export async function POST(req: NextRequest) {
               send({
                 kind: "answer",
                 iteration: currentIteration,
-                content: finalAnswer || content,
+                content: finalAnswer || content || "The model returned an empty response after multiple attempts. Try again or switch models.",
               })
               finalAnswerFound = true
             }

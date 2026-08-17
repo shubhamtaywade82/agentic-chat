@@ -223,9 +223,16 @@ export async function executeLiveTool(
 
     // Binance Tools (Public Market Data)
     if (norm.startsWith("binance_") || norm.startsWith("futures_")) {
+      const rawSym = getStr("symbol", getStr("ticker", ""))
+      if (!rawSym) {
+        return {
+          summary: `Missing required "symbol" for ${toolName}`,
+          data: { error: `symbol is required, e.g. {"symbol": "SOLUSDT"}` },
+          error: "missing_symbol",
+        }
+      }
       const binance = resolveBinanceClient(binanceConfig)
-      const rawSym = getStr("symbol", getStr("ticker", "BTCUSDT"))
-      const symbol = rawSym.replace(/[\/\-_\s]/g, "").toUpperCase() || "BTCUSDT"
+      const symbol = rawSym.replace(/[^A-Za-z0-9]/g, "").toUpperCase()
 
       if (norm.includes("price")) {
         const data = await binance.futures.market.tickerPrice(symbol)
