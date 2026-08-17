@@ -89,7 +89,6 @@ export function TraceStepView({ step, isLast, index }: { step: TraceStep; isLast
       transition={{ duration: 0.28, ease: "easeOut" }}
       className="relative pl-8"
     >
-      {/* timeline rail + node */}
       <div className="absolute left-0 top-0 bottom-0 flex flex-col items-center">
         {!isLast && <div className="absolute top-6 bottom-0 w-px bg-border" />}
         <div
@@ -213,7 +212,9 @@ function PlanBody({
   step: Extract<TraceStep, { kind: "plan" }>
   meta: (typeof KIND_META)["plan"]
 }) {
-  const completed = step.steps.filter((s) => s.done).length
+  const stepsList = Array.isArray(step.steps) ? step.steps : []
+  const completed = stepsList.filter((s) => (typeof s === "object" ? s.done : false)).length
+
   return (
     <div className={cn("rounded-lg border p-3", meta.border, meta.bg)}>
       <p className="mb-2 text-sm text-foreground">
@@ -221,21 +222,23 @@ function PlanBody({
         <span className="font-medium">{step.goal}</span>
       </p>
       <ol className="space-y-1.5">
-        {step.steps.map((s, i) => {
-          // simulate progressive completion based on step status
-          const done = step.status === "completed" || i < completed
+        {stepsList.map((s, i) => {
+          const text = typeof s === "string" ? s : s.text
+          const isDone = typeof s === "object" ? s.done || step.status === "completed" : step.status === "completed" || i < completed
+          const key = typeof s === "object" && s.id ? s.id : `plan_step_${i}_${String(text).slice(0, 12)}`
+
           return (
-            <li key={s.id} className="flex items-start gap-2 text-sm">
+            <li key={key} className="flex items-start gap-2 text-sm">
               <span
                 className={cn(
                   "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px]",
-                  done ? cn(meta.border, meta.bg, meta.text) : "border-border text-muted-foreground"
+                  isDone ? cn(meta.border, meta.bg, meta.text) : "border-border text-muted-foreground"
                 )}
               >
-                {done ? <Check className="h-2.5 w-2.5" /> : i + 1}
+                {isDone ? <Check className="h-2.5 w-2.5" /> : i + 1}
               </span>
-              <span className={cn(done && "text-muted-foreground line-through decoration-muted-foreground/40")}>
-                {s.text}
+              <span className={cn(isDone && "text-muted-foreground line-through decoration-muted-foreground/40")}>
+                {text}
               </span>
             </li>
           )

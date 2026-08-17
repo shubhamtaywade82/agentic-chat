@@ -20,8 +20,10 @@ interface AgentState {
   models: ModelOption[]
   isLoadingModels: boolean
   isLiveModels: boolean
+  hydrated: boolean
 
   // Actions
+  hydrateFromStorage: () => void
   loadModels: (provider?: LlmProvider, baseUrl?: string, apiKey?: string) => Promise<void>
   sendUserMessage: (text: string) => Promise<void>
   setSpeed: (s: number) => void
@@ -42,14 +44,14 @@ interface AgentState {
   clear: () => void
 }
 
-const initialSessionId = `sess_${Date.now()}`
+const initialSessionId = "sess_initial"
 const initialWelcomeMessage: AgentMessage = {
   id: "welcome",
   role: "agent",
   status: "completed",
   query: "welcome",
-  startedAt: Date.now(),
-  finishedAt: Date.now(),
+  startedAt: 1700000000000,
+  finishedAt: 1700000000000,
   iterations: 0,
   totalTokens: 0,
   modelId: DEFAULT_CONFIG.modelId,
@@ -61,50 +63,58 @@ const initialWelcomeMessage: AgentMessage = {
       kind: "answer",
       status: "completed",
       iteration: 1,
-      startedAt: Date.now(),
-      finishedAt: Date.now(),
+      startedAt: 1700000000000,
+      finishedAt: 1700000000000,
       content:
         "👋 Welcome to the **Agentic ReAct Runtime**.\n\nConnected directly to real LLM providers (**Ollama Local**, **Ollama Cloud**, **OpenAI**, **Groq**, etc.) with live tool execution.\n\n- **Ollama Local**: Zero API key needed.\n- **Ollama Cloud & Cloud Providers**: Multiple API key management.\n- **Filtered Models**: Clean list of chat models with embedding models excluded.",
     },
   ],
 }
 
-function loadSavedState(): { sessions: ChatSession[]; config: AgentConfig } {
-  if (typeof window === "undefined") {
-    return {
-      sessions: [{ id: initialSessionId, title: "Initial Session", createdAt: Date.now(), updatedAt: Date.now(), messages: [initialWelcomeMessage] }],
-      config: DEFAULT_CONFIG,
-    }
-  }
-  try {
-    const s = localStorage.getItem(STORAGE_KEY)
-    const c = localStorage.getItem(CONFIG_KEY)
-    return {
-      sessions: s ? JSON.parse(s) : [{ id: initialSessionId, title: "Initial Session", createdAt: Date.now(), updatedAt: Date.now(), messages: [initialWelcomeMessage] }],
-      config: c ? { ...DEFAULT_CONFIG, ...JSON.parse(c) } : DEFAULT_CONFIG,
-    }
-  } catch {
-    return {
-      sessions: [{ id: initialSessionId, title: "Initial Session", createdAt: Date.now(), updatedAt: Date.now(), messages: [initialWelcomeMessage] }],
-      config: DEFAULT_CONFIG,
-    }
-  }
+const defaultSession: ChatSession = {
+  id: initialSessionId,
+  title: "Initial Session",
+  createdAt: 1700000000000,
+  updatedAt: 1700000000000,
+  messages: [initialWelcomeMessage],
 }
 
-const saved = loadSavedState()
-
 export const useAgentStore = create<AgentState>((set, get) => ({
-  sessions: saved.sessions,
-  activeSessionId: saved.sessions[0]?.id || initialSessionId,
-  messages: saved.sessions[0]?.messages || [initialWelcomeMessage],
+  sessions: [defaultSession],
+  activeSessionId: initialSessionId,
+  messages: [initialWelcomeMessage],
   isRunning: false,
   activeMessageId: null,
   speed: 1,
-  config: saved.config,
+  config: DEFAULT_CONFIG,
   sidebarCollapsed: false,
-  models: AVAILABLE_MODELS.filter((m) => m.provider === saved.config.provider),
+  models: AVAILABLE_MODELS.filter((m) => m.provider === DEFAULT_CONFIG.provider),
   isLoadingModels: false,
   isLiveModels: false,
+  hydrated: false,
+
+  hydrateFromStorage: () => {
+    if (typeof window === "undefined" || get().hydrated) return
+    try {
+      const savedSessions = localStorage.getItem(STORAGE_KEY)
+      const savedConfig = localStorage.getItem(CONFIG_KEY)
+      const parsedConfig = savedConfig ? { ...DEFAULT_CONFIG, ...JSON.parse(savedConfig) } : DEFAULT_CONFIG
+      const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
+      const activeId = parsedSessions[0]?.id || initialSessionId
+      const activeMsgs = parsedSessions[0]?.messages || [initialWelcomeMessage]
+
+      set({
+        sessions: parsedSessions,
+        activeSessionId: activeId,
+        messages: activeMsgs,
+        config: parsedConfig,
+        hydrated: true,
+      })
+      get().loadModels(parsedConfig.provider, parsedConfig.apiBaseUrl, parsedConfig.apiKey)
+    } catch {
+      set({ hydrated: true })
+    }
+  },
 
   loadModels: async (providerOverride, baseUrlOverride, apiKeyOverride) => {
     const provider = providerOverride || get().config.provider

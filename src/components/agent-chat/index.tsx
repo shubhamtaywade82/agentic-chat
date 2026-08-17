@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useAgentStore } from "@/store/agent-store"
 import { AgentMessageView } from "./agent-message"
 import { UserMessageView } from "./user-message"
@@ -11,23 +11,26 @@ import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings } from "lucide-rea
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
+import { DEFAULT_CONFIG } from "@/lib/agent-types"
+
+const emptySubscribe = () => () => {}
 
 export function AgentChat() {
+  const isMounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
   const messages = useAgentStore((s) => s.messages)
   const isRunning = useAgentStore((s) => s.isRunning)
   const activeMessageId = useAgentStore((s) => s.activeMessageId)
   const config = useAgentStore((s) => s.config)
   const clear = useAgentStore((s) => s.clear)
-  const loadModels = useAgentStore((s) => s.loadModels)
+  const hydrateFromStorage = useAgentStore((s) => s.hydrateFromStorage)
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  // Load provider models on initial mount
   useEffect(() => {
-    loadModels()
-  }, [loadModels])
+    hydrateFromStorage()
+  }, [hydrateFromStorage])
 
   // auto-scroll to bottom on new content
   useEffect(() => {
@@ -35,6 +38,9 @@ export function AgentChat() {
     if (!el) return
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [messages, activeMessageId, isRunning])
+
+  const activeProvider = isMounted ? config.provider : DEFAULT_CONFIG.provider
+  const activeModel = isMounted ? config.modelId : DEFAULT_CONFIG.modelId
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -83,8 +89,8 @@ export function AgentChat() {
             trigger={
               <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs font-mono">
                 <Settings className="h-3 w-3 text-muted-foreground" />
-                <span className="hidden sm:inline">{config.provider.replace(/_/g, " ")}:</span>
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{config.modelId}</span>
+                <span className="hidden sm:inline">{activeProvider.replace(/_/g, " ")}:</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{activeModel}</span>
               </Button>
             }
           />
@@ -129,7 +135,7 @@ export function AgentChat() {
       <footer className="flex h-7 shrink-0 items-center justify-between border-t border-border bg-background px-4 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Agent runtime online · Connected to {config.provider.replace(/_/g, " ")}
+          Agent runtime online · Connected to {activeProvider.replace(/_/g, " ")}
         </span>
         <span className="font-mono">ReAct = Reason + Act + Observe · loop until answer</span>
       </footer>
