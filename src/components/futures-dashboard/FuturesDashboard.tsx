@@ -6,6 +6,7 @@ import { LineChart, ArrowLeft } from "lucide-react"
 import { Watchlist } from "./Watchlist"
 import { PriceChart } from "./PriceChart"
 import { SentimentPanel } from "./SentimentPanel"
+import { PositionsPanel } from "./PositionsPanel"
 
 export function FuturesDashboard() {
   const [activeSymbol, setActiveSymbol] = useState("BTCUSDT")
@@ -38,7 +39,7 @@ export function FuturesDashboard() {
           </div>
           <div className="space-y-4">
             <SentimentPanel symbol={activeSymbol} />
-            <div id="dashboard-positions-slot" />
+            <PositionsPanel />
           </div>
         </div>
       </div>
