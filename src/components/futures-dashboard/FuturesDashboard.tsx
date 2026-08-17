@@ -7,6 +7,7 @@ import { Watchlist } from "./Watchlist"
 import { PriceChart } from "./PriceChart"
 import { SentimentPanel } from "./SentimentPanel"
 import { PositionsPanel } from "./PositionsPanel"
+import { OrderBookPanel } from "./OrderBookPanel"
 
 export function FuturesDashboard() {
   const [activeSymbol, setActiveSymbol] = useState("BTCUSDT")
@@ -35,7 +36,7 @@ export function FuturesDashboard() {
           <Watchlist activeSymbol={activeSymbol} onSelect={setActiveSymbol} />
           <div className="space-y-4">
             <PriceChart symbol={activeSymbol} />
-            <div id="dashboard-orderbook-slot" />
+            <OrderBookPanel symbol={activeSymbol} />
           </div>
           <div className="space-y-4">
             <SentimentPanel symbol={activeSymbol} />
