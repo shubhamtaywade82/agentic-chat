@@ -231,7 +231,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   modelId: "llama3.2:3b",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   temperature: 0.3,
-  maxIterations: 6,
+  maxIterations: 10,
   maxTokens: 2048,
   enabledTools: Object.fromEntries(AVAILABLE_TOOLS.map((t) => [t.name, true])),
   provider: "ollama_local",

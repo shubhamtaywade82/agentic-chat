@@ -227,7 +227,7 @@ export async function POST(req: NextRequest) {
         ]
 
         let currentIteration = 1
-        const maxIters = config.maxIterations || 6
+        const maxIters = config.maxIterations || 10
         let finalAnswerFound = false
         let planDetected = false
         let toolCallMade = false
