@@ -84,6 +84,17 @@ function parsePlan(text: string): string[] | null {
   return lines.length > 0 ? lines : null
 }
 
+// Extracts clean final answer preserving rich markdown formatting
+function extractFinalAnswer(content: string): string {
+  const answerMatch = content.match(/Final Answer:\s*([\s\S]*)$/i)
+  if (answerMatch) return answerMatch[1].trim()
+
+  const withoutThought = content.replace(/^Thought:\s*[\s\S]*?(?=\n\n(?:```|[#*-]|<table|\[|{))/i, "").trim()
+  if (withoutThought && withoutThought !== content) return withoutThought
+
+  return content.replace(/^Thought:[\s\S]*?(?=\n\s*(?:Final Answer:|$))/i, "").replace(/^Final Answer:\s*/i, "").trim() || content
+}
+
 export async function POST(req: NextRequest) {
   const { query, config, customTools = [] } = (await req.json()) as {
     query: string
@@ -143,9 +154,9 @@ export async function POST(req: NextRequest) {
 
           // Step 3: Check for Action vs Final Answer
           const action = parseAction(content)
-          const answerMatch = content.match(/Final Answer:\s*([\s\S]*)$/i)
+          const hasAnswerMarker = /Final Answer:/i.test(content)
 
-          if (action && !answerMatch) {
+          if (action && !hasAnswerMarker) {
             send({
               kind: "tool_call",
               iteration: currentIteration,
@@ -168,12 +179,12 @@ export async function POST(req: NextRequest) {
             conversation.push({ role: "assistant", content })
             conversation.push({
               role: "user",
-              content: `Observation from ${action.toolName}:\n${JSON.stringify(toolResult.data, null, 2)}\n\nContinue with your next Thought and Action or provide your Final Answer.`,
+              content: `Observation from ${action.toolName}:\n${JSON.stringify(toolResult.data, null, 2)}\n\nContinue with your next Thought and Action or provide your Final Answer formatted in rich Markdown.`,
             })
 
             currentIteration += 1
           } else {
-            const finalAnswer = answerMatch ? answerMatch[1].trim() : content.replace(/^Thought:[\s\S]*?(?=Final Answer:)/i, "").replace(/^Final Answer:\s*/i, "").trim()
+            const finalAnswer = extractFinalAnswer(content)
             send({
               kind: "answer",
               iteration: currentIteration,

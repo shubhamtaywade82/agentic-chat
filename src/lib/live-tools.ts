@@ -36,7 +36,7 @@ Action Input: {"param": "value"}
 (Wait for Observation from system)
 
 Thought: [Evaluate observation]
-Final Answer: [Your final response to user]`
+Final Answer: [Your complete response formatted in rich GitHub-flavored Markdown. Use fenced code blocks (\`\`\`language) for code/JSON/HTML/CSS, markdown tables for tabular data, and lists/headers for structure.]`
 }
 
 // Safe math evaluator using Function with sanitized math tokens

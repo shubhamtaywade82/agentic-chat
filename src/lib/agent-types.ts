@@ -170,16 +170,16 @@ export interface ChatSession {
 
 export const DEFAULT_SYSTEM_PROMPT = `You are a methodical, autonomous ReAct agent.
 Follow the ReAct (Reasoning + Acting) loop:
-1. Plan: Decompose the request into steps.
+1. Plan: Decompose the request into logical steps.
 2. Thought: Reason about what action is needed.
 3. Action: Call tools when helpful to verify facts or execute calculations.
 4. Observation: Inspect tool output carefully.
-5. Final Answer: Provide a concise, helpful response.`
+5. Final Answer: Format your answer cleanly using rich GitHub-flavored Markdown (fenced code blocks with language tags, tables, bullet points, headers, bold/italic formatting).`
 
 export const DEFAULT_CONFIG: AgentConfig = {
   modelId: "llama3.2:3b",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  temperature: 0.4,
+  temperature: 0.3,
   maxIterations: 6,
   maxTokens: 2048,
   enabledTools: Object.fromEntries(AVAILABLE_TOOLS.map((t) => [t.name, true])),
