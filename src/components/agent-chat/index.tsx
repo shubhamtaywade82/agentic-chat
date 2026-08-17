@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import Link from "next/link"
 import { useAgentStore } from "@/store/agent-store"
 import { AgentMessageView } from "./agent-message"
 import { UserMessageView } from "./user-message"
@@ -9,7 +10,7 @@ import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
 import { AgentConfigDialog } from "./agent-config-dialog"
 import { LiveTickerBar } from "./live-ticker-bar"
-import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings } from "lucide-react"
+import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings, LineChart } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
@@ -82,6 +83,13 @@ export function AgentChat() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <Link href="/dashboard">
+            <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+              <LineChart className="h-3 w-3 text-muted-foreground" />
+              <span className="hidden sm:inline">Dashboard</span>
+            </Button>
+          </Link>
+
           <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
             <Zap className="h-2.5 w-2.5" /> Real LLM
           </Badge>
