@@ -248,12 +248,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       temperature: config.temperature, maxIterations: config.maxIterations, provider: config.provider,
     }
 
+    const history = get().messages
+      .filter((m) => m.id !== userMsg.id && m.id !== agentMsgId)
+      .map((m) => {
+        if (m.role === "user") {
+          return { role: "user" as const, content: m.content || "" }
+        }
+        const answer = m.trace?.find((t) => t.kind === "answer")?.content || m.content || ""
+        return { role: "assistant" as const, content: answer }
+      })
+      .filter((m) => m.content.trim().length > 0)
+      .slice(-10)
+
     set({ messages: [...get().messages, userMsg, agentMsg], isRunning: true, activeMessageId: agentMsgId })
 
     try {
       const res = await fetch("/api/agent", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text, config, customTools: config.customTools }),
+        body: JSON.stringify({ query: text, history, config, customTools: config.customTools }),
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
 

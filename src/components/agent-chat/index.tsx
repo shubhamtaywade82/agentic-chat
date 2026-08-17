@@ -7,6 +7,7 @@ import { UserMessageView } from "./user-message"
 import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
 import { AgentConfigDialog } from "./agent-config-dialog"
+import { LiveTickerBar } from "./live-ticker-bar"
 import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -102,6 +103,9 @@ export function AgentChat() {
           )}
         </div>
       </header>
+
+      {/* Live WebSocket Ticker Stream Bar */}
+      <LiveTickerBar />
 
       {/* Body */}
       <div className="flex min-h-0 flex-1 overflow-hidden">

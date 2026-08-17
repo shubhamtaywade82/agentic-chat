@@ -16,11 +16,11 @@ function prepareMarkdownContent(raw: string): string {
   // Strip leading artifact asterisks
   text = text.replace(/^\*+\s*\n/, "").trim()
 
-  // Unwrap outer ```markdown ... ``` wrapper if LLM wrapped the entire response
-  const outerMdMatch = text.match(/^```(?:markdown|md)\s*\n([\s\S]*?)\n```$/i)
-  if (outerMdMatch) {
-    text = outerMdMatch[1].trim()
-  }
+  // Unwrap any ```markdown ... ``` or ```md ... ``` fences so they render as rich markdown rather than code block boxes
+  text = text.replace(/```(?:markdown|md)\s*\n([\s\S]*?)\n```/gi, "$1")
+
+  // Unwrap outer untagged ``` ... ``` if the entire message is wrapped
+  text = text.replace(/^```\s*\n([\s\S]*?)\n```$/gi, "$1")
 
   // If text is pure JSON object or array not already fenced
   if (

@@ -187,8 +187,9 @@ function extractFinalAnswer(content: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const { query, config, customTools = [] } = (await req.json()) as {
+  const { query, history = [], config, customTools = [] } = (await req.json()) as {
     query: string
+    history?: { role: "user" | "assistant"; content: string }[]
     config: AgentConfig
     customTools?: CustomTool[]
   }
@@ -204,6 +205,7 @@ export async function POST(req: NextRequest) {
         const systemPrompt = `${config.systemPrompt}\n\n${getToolSystemPrompt(config.enabledTools, customTools)}`
         const conversation: ChatMessage[] = [
           { role: "system", content: systemPrompt },
+          ...history.map((h) => ({ role: h.role, content: h.content })),
           { role: "user", content: query },
         ]
 
