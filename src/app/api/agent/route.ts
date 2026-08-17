@@ -159,7 +159,7 @@ function parseAction(text: string, customTools: CustomTool[] = []): { toolName: 
   }
 
   // 3. Natural language tool intent fallback (e.g. "I will fetch using binance_price with symbol 'SOLUSDT'")
-  const natMatch = text.match(/(?:using|calling|call|use)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)(?:[\s\S]*?(?:symbol|ticker|underlyingSymbol|query|location|code|securityId|expression)["\s:=]+([a-zA-Z0-9_\.\-]+))?/i)
+  const natMatch = text.match(/(?:using|calling|call|use|fetch|fetching|get|getting|retrieve|retrieving)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)(?:[\s\S]*?(?:symbol|ticker|underlyingSymbol|query|location|code|securityId|expression)["\s:=]+([a-zA-Z0-9_\.\-]+))?/i)
   if (natMatch) {
     const rawTool = natMatch[1].toLowerCase().replace(/[^a-z0-9_]/g, "")
     const normalized = normalizeToolName(rawTool, customTools)
@@ -229,6 +229,8 @@ export async function POST(req: NextRequest) {
         let currentIteration = 1
         const maxIters = config.maxIterations || 6
         let finalAnswerFound = false
+        let planDetected = false
+        let toolCallMade = false
 
         while (currentIteration <= maxIters && !finalAnswerFound) {
           const llmRes = await callLlm(conversation, config)
@@ -238,6 +240,7 @@ export async function POST(req: NextRequest) {
           if (currentIteration === 1) {
             const planSteps = parsePlan(content)
             if (planSteps) {
+              planDetected = true
               send({
                 kind: "plan",
                 iteration: currentIteration,
@@ -282,6 +285,7 @@ export async function POST(req: NextRequest) {
               args: action.args,
             })
 
+            toolCallMade = true
             const toolResult = await executeLiveTool(action.toolName, action.args, customTools, config.dhan, config.binance)
 
             send({
@@ -306,12 +310,19 @@ export async function POST(req: NextRequest) {
               !finalAnswer ||
               ((content.trim().startsWith("Plan:") || content.trim().startsWith("Thought:")) &&
                 !/Final Answer:/i.test(content))
+            // A Plan promises tool-gathered data; a "Final Answer:" label alone isn't proof the
+            // model actually gathered it. Without this, an undetected tool intent (parseAction
+            // returning null on an unrecognized phrasing) silently starves the loop of real tool
+            // calls, and the model's stub answer ships to the user as if it were complete.
+            const answerPrematureVsPlan = planDetected && !toolCallMade
 
-            if (isOnlyPlanOrThought && currentIteration < maxIters) {
+            if ((isOnlyPlanOrThought || answerPrematureVsPlan) && currentIteration < maxIters) {
               conversation.push({ role: "assistant", content })
               conversation.push({
                 role: "user",
-                content: "Observation reviewed. Please present your complete Final Answer in rich Markdown to the user.",
+                content: answerPrematureVsPlan
+                  ? "Your plan requires live data you haven't fetched yet. Emit an Action to call the needed tool now — do not give a Final Answer until you have real tool observations to base it on."
+                  : "Observation reviewed. Please present your complete Final Answer in rich Markdown to the user.",
               })
               currentIteration += 1
             } else {
