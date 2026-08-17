@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { CustomTool } from "@/lib/agent-types"
-import { executeCustomTool } from "@/lib/live-tools"
+import { executeCustomTool } from "@/lib/custom-tool-runner"
 
 const PRESETS: Record<string, Partial<CustomTool>> = {
   currency: {

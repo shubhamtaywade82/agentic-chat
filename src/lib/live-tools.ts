@@ -1,24 +1,62 @@
-import type { CustomTool } from "./agent-types"
+import type { BinanceConfig, CustomTool, DhanConfig } from "./agent-types"
+import * as DhanPkg from "@shubhamtaywade82/dhanhq-ts"
+import * as BinancePkg from "binance-client-ts"
+
+const DhanClient = (DhanPkg as { DhanClient?: typeof DhanPkg.DhanClient; default?: { DhanClient?: typeof DhanPkg.DhanClient } }).DhanClient || (DhanPkg as { default?: { DhanClient?: typeof DhanPkg.DhanClient } }).default?.DhanClient || DhanPkg.DhanClient
+const AgentToolRegistry = (DhanPkg as { AgentToolRegistry?: typeof DhanPkg.AgentToolRegistry; default?: { AgentToolRegistry?: typeof DhanPkg.AgentToolRegistry } }).AgentToolRegistry || (DhanPkg as { default?: { AgentToolRegistry?: typeof DhanPkg.AgentToolRegistry } }).default?.AgentToolRegistry || DhanPkg.AgentToolRegistry
+const BinanceClient = (BinancePkg as { BinanceClient?: typeof BinancePkg.BinanceClient; default?: { BinanceClient?: typeof BinancePkg.BinanceClient } }).BinanceClient || (BinancePkg as { default?: { BinanceClient?: typeof BinancePkg.BinanceClient } }).default?.BinanceClient || BinancePkg.BinanceClient
+
+// Resolves DhanClient using Direct or Endpoint Auth
+export async function resolveDhanClient(config?: DhanConfig): Promise<InstanceType<typeof DhanClient>> {
+  if (config?.authMode === "endpoint") {
+    const endpointBaseUrl = config.endpointBaseUrl || "https://algo-trading-api.onrender.com"
+    const bearerToken = config.bearerToken || process.env.DHAN_TOKEN_ACCESS_TOKEN || ""
+    return await DhanClient.fromTokenEndpoint({ endpointBaseUrl, bearerToken })
+  }
+  const token = config?.token || process.env.DHAN_TOKEN || ""
+  const clientId = config?.clientId || process.env.DHAN_CLIENT_ID || ""
+  return new DhanClient({ token, clientId })
+}
+
+// Resolves BinanceClient for public or private APIs
+export function resolveBinanceClient(config?: BinanceConfig): InstanceType<typeof BinanceClient> {
+  return new BinanceClient({
+    apiKey: config?.apiKey || undefined,
+    apiSecret: config?.apiSecret || undefined,
+    testnet: Boolean(config?.testnet),
+  })
+}
 
 // Returns structured instructions explaining available tools to the LLM
 export function getToolSystemPrompt(enabledTools: Record<string, boolean>, customTools: CustomTool[] = []): string {
   const tools: string[] = []
-  if (enabledTools.calculator !== false) {
-    tools.push(`- calculator: {"expression": "string"} // Evaluate mathematical expressions (e.g. {"expression": "45 * 18 + 120"})`)
-  }
-  if (enabledTools.weather_api !== false) {
-    tools.push(`- weather_api: {"location": "string"} // Get real-time weather & forecast for any city (e.g. {"location": "Tokyo"})`)
-  }
-  if (enabledTools.web_search !== false) {
-    tools.push(`- web_search: {"query": "string"} // Search Wikipedia and web for live facts and news`)
-  }
-  if (enabledTools.code_interpreter !== false) {
-    tools.push(`- code_interpreter: {"code": "string"} // Execute sandbox JavaScript code`)
-  }
+
+  // General tools
+  if (enabledTools.calculator !== false) tools.push(`- calculator: {"expression": "string"} // Evaluate math expressions (e.g. {"expression": "45 * 18 + 120"})`)
+  if (enabledTools.weather_api !== false) tools.push(`- weather_api: {"location": "string"} // Get real-time weather (e.g. {"location": "Tokyo"})`)
+  if (enabledTools.web_search !== false) tools.push(`- web_search: {"query": "string"} // Search Wikipedia and web for live facts`)
+  if (enabledTools.code_interpreter !== false) tools.push(`- code_interpreter: {"code": "string"} // Execute sandbox JavaScript code`)
+
+  // Binance tools
+  if (enabledTools.binance_price !== false) tools.push(`- binance_price: {"symbol": "string"} // Real-time crypto price (e.g. {"symbol": "BTCUSDT"})`)
+  if (enabledTools.binance_24hr_ticker !== false) tools.push(`- binance_24hr_ticker: {"symbol": "string"} // 24hr stats, % change, volume, high, low`)
+  if (enabledTools.binance_klines !== false) tools.push(`- binance_klines: {"symbol": "string", "interval": "1h"|"15m"|"1d", "limit": 10} // Candlestick OHLCV data`)
+  if (enabledTools.binance_order_book !== false) tools.push(`- binance_order_book: {"symbol": "string", "limit": "20"} // Order book depth bids & asks`)
+  if (enabledTools.binance_funding_rate !== false) tools.push(`- binance_funding_rate: {"symbol": "string"} // Current and historical funding rates`)
+  if (enabledTools.binance_open_interest !== false) tools.push(`- binance_open_interest: {"symbol": "string"} // Real-time total open interest`)
+  if (enabledTools.binance_long_short_ratio !== false) tools.push(`- binance_long_short_ratio: {"symbol": "string", "period": "1h"} // Top trader & global long/short ratio`)
+
+  // DhanHQ tools
+  if (enabledTools.dhan_ltp !== false) tools.push(`- dhan_ltp: {"securityId": "1333", "exchangeSegment": "NSE_EQ"} // Last Traded Price for Indian stocks`)
+  if (enabledTools.dhan_quote !== false) tools.push(`- dhan_quote: {"securityId": "1333", "exchangeSegment": "NSE_EQ"} // Full quote with OHLC and depth`)
+  if (enabledTools.dhan_holdings !== false) tools.push(`- dhan_holdings: {} // Fetch stock holdings from Dhan account`)
+  if (enabledTools.dhan_positions !== false) tools.push(`- dhan_positions: {} // Fetch open trading positions`)
+  if (enabledTools.dhan_funds !== false) tools.push(`- dhan_funds: {} // Fetch available cash limits and margin`)
+  if (enabledTools.dhan_option_chain !== false) tools.push(`- dhan_option_chain: {"underlyingScrip": 13, "underlyingSegment": "IDX_I", "expiry": "YYYY-MM-DD"} // Option chain with Greeks`)
+  if (enabledTools.dhan_market_summary !== false) tools.push(`- dhan_market_summary: {"underlyingSymbol": "NIFTY"} // Summarize technicals, PCR, and OI walls`)
+
   for (const c of customTools) {
-    if (c.enabled) {
-      tools.push(`- ${c.name}: ${c.parameters || "{}"} // ${c.description}`)
-    }
+    if (c.enabled) tools.push(`- ${c.name}: ${c.parameters || "{}"} // ${c.description}`)
   }
 
   return `AVAILABLE TOOLS:
@@ -36,146 +74,73 @@ Action Input: {"param": "value"}
 (Wait for Observation from system)
 
 Thought: [Evaluate observation]
-Final Answer: [Your complete response formatted in rich GitHub-flavored Markdown. Use fenced code blocks (\`\`\`language) for code/JSON/HTML/CSS, markdown tables for tabular data, and lists/headers for structure.]`
+Final Answer: [Your complete response formatted in rich GitHub-flavored Markdown. Use fenced code blocks (\`\`\`language) for code/JSON/HTML, markdown tables for tabular data, and lists/headers for structure.]`
 }
 
-// Safe math evaluator using Function with sanitized math tokens
+// Math calculation helper
 export function executeCalculator(expression: string): { expression: string; result: number } {
   const sanitized = expression
-    .replace(/×/g, "*")
-    .replace(/÷/g, "/")
-    .replace(/\^/g, "**")
-    .replace(/sqrt\(/g, "Math.sqrt(")
-    .replace(/sin\(/g, "Math.sin(")
-    .replace(/cos\(/g, "Math.cos(")
-    .replace(/tan\(/g, "Math.tan(")
-    .replace(/abs\(/g, "Math.abs(")
-    .replace(/log\(/g, "Math.log10(")
-    .replace(/ln\(/g, "Math.log(")
-    .replace(/pi/gi, "Math.PI")
-    .replace(/e/gi, "Math.E")
+    .replace(/×/g, "*").replace(/÷/g, "/").replace(/\^/g, "**")
+    .replace(/sqrt\(/g, "Math.sqrt(").replace(/sin\(/g, "Math.sin(").replace(/cos\(/g, "Math.cos(")
+    .replace(/tan\(/g, "Math.tan(").replace(/abs\(/g, "Math.abs(")
+    .replace(/log\(/g, "Math.log10(").replace(/ln\(/g, "Math.log(")
+    .replace(/pi/gi, "Math.PI").replace(/e/gi, "Math.E")
 
-  if (/[^0-9+\-*/().,%\sMathPIE*]/.test(sanitized)) {
-    throw new Error("Invalid characters in math expression")
-  }
-
+  if (/[^0-9+\-*/().,%\sMathPIE*]/.test(sanitized)) throw new Error("Invalid characters in math expression")
   const result = Number(new Function(`"use strict"; return (${sanitized})`)())
-  if (isNaN(result) || !isFinite(result)) {
-    throw new Error("Math expression resulted in NaN or Infinity")
-  }
+  if (isNaN(result) || !isFinite(result)) throw new Error("Math expression resulted in NaN or Infinity")
   return { expression, result: Number(result.toFixed(6)) }
 }
 
-const WMO_CODES: Record<number, string> = {
-  0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-  45: "Fog", 48: "Depositing rime fog", 51: "Light drizzle", 53: "Moderate drizzle",
-  61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain", 71: "Slight snow",
-  80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
-  95: "Thunderstorm",
-}
-
-// Live weather lookup from Open-Meteo public API (no API key required)
+// Weather lookup helper
 export async function executeWeather(location: string) {
-  const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`
-  const geoRes = await fetch(geoUrl)
+  const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`)
   const geoData = await geoRes.json()
-  
-  if (!geoData.results || geoData.results.length === 0) {
-    return { location, error: `Location "${location}" not found`, temperature_c: 20, condition: "Unknown" }
-  }
-
+  if (!geoData.results || geoData.results.length === 0) return { location, error: `Location "${location}" not found`, temperature_c: 20 }
   const { latitude, longitude, name, country } = geoData.results[0]
-  const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto`
-  const weatherRes = await fetch(weatherUrl)
+  const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=auto`)
   const data = await weatherRes.json()
-
-  const current = data.current ?? {}
-  const daily = data.daily ?? {}
-  const condition = WMO_CODES[current.weather_code] ?? "Clear"
-
-  const forecast = (daily.time ?? []).slice(0, 3).map((day: string, idx: number) => ({
-    day: idx === 0 ? "Today" : idx === 1 ? "Tomorrow" : day,
-    high: Math.round(daily.temperature_2m_max?.[idx] ?? 0),
-    low: Math.round(daily.temperature_2m_min?.[idx] ?? 0),
-    condition: WMO_CODES[daily.weather_code?.[idx]] ?? "Fair",
-  }))
-
-  return {
-    location: `${name}, ${country}`,
-    temperature_c: Math.round(current.temperature_2m ?? 0),
-    temperature_f: Math.round(((current.temperature_2m ?? 0) * 9) / 5 + 32),
-    condition,
-    humidity: current.relative_humidity_2m ?? 0,
-    wind_kph: Math.round(current.wind_speed_10m ?? 0),
-    forecast,
-  }
+  return { location: `${name}, ${country}`, temperature_c: Math.round(data.current?.temperature_2m ?? 0), humidity: data.current?.relative_humidity_2m ?? 0 }
 }
 
-// Live web search using Wikipedia and DuckDuckGo public APIs
+// Web search helper
 export async function executeWebSearch(query: string) {
   try {
-    const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json&origin=*`
-    const res = await fetch(wikiUrl)
+    const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json&origin=*`)
     const data = await res.json()
-    const searchResults = data?.query?.search ?? []
-
-    if (searchResults.length > 0) {
-      const results = searchResults.slice(0, 3).map((item: { title: string; snippet: string }) => ({
-        title: item.title,
-        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/\s+/g, "_"))}`,
-        snippet: item.snippet.replace(/<[^>]+>/g, ""),
-      }))
-      return { query, results, total: results.length }
-    }
+    const searchResults = (data?.query?.search ?? []).slice(0, 3).map((item: { title: string; snippet: string }) => ({
+      title: item.title,
+      snippet: item.snippet.replace(/<[^>]+>/g, ""),
+    }))
+    return { query, results: searchResults, total: searchResults.length }
   } catch {
-    // Fallback if network request fails
-  }
-
-  return {
-    query,
-    results: [
-      { title: `Overview: ${query}`, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`, snippet: `Verified live reference information regarding ${query}.` },
-    ],
-    total: 1,
+    return { query, results: [{ title: query, snippet: `Live reference for ${query}` }], total: 1 }
   }
 }
 
-// Execute JavaScript code sandbox
+// Code interpreter helper
 export function executeCodeInterpreter(code: string) {
   const logs: string[] = []
-  const customConsole = {
-    log: (...args: unknown[]) => logs.push(args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ")),
-    error: (...args: unknown[]) => logs.push("[ERROR] " + args.map((a) => String(a)).join(" ")),
-  }
-
-  const start = performance.now()
+  const customConsole = { log: (...args: unknown[]) => logs.push(args.map((a) => String(a)).join(" ")) }
   try {
     const fn = new Function("console", `"use strict"; ${code}`)
     const returned = fn(customConsole)
-    const stdout = logs.join("\n") || (returned !== undefined ? String(returned) : "(no output)")
-    return { exit_code: 0, stdout, execution_ms: Math.round(performance.now() - start) }
+    return { exit_code: 0, stdout: logs.join("\n") || (returned !== undefined ? String(returned) : "(no output)") }
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err)
-    return { exit_code: 1, stdout: logs.join("\n"), stderr: errorMsg, execution_ms: Math.round(performance.now() - start) }
+    return { exit_code: 1, stderr: err instanceof Error ? err.message : String(err) }
   }
 }
 
-// Execute custom user-defined tool
+// Custom tool executor
 export async function executeCustomTool(tool: CustomTool, args: Record<string, unknown>) {
   if (tool.mode === "static") {
-    try {
-      return JSON.parse(tool.code)
-    } catch {
-      return { result: tool.code }
-    }
+    try { return JSON.parse(tool.code) } catch { return { result: tool.code } }
   }
-
   if (tool.mode === "fetch") {
-    const url = tool.code.replace(/\{(\w+)\}/g, (_, key) => encodeURIComponent(String(args[key] ?? "")))
+    const url = tool.code.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(String(args[k] ?? "")))
     const res = await fetch(url)
     return await res.json()
   }
-
   const fn = new Function("args", `"use strict"; ${tool.code}`)
   return await fn(args)
 }
@@ -184,53 +149,110 @@ export async function executeCustomTool(tool: CustomTool, args: Record<string, u
 export async function executeLiveTool(
   toolName: string,
   args: Record<string, unknown> | string,
-  customTools: CustomTool[] = []
+  customTools: CustomTool[] = [],
+  dhanConfig?: DhanConfig,
+  binanceConfig?: BinanceConfig
 ): Promise<{ summary: string; data: unknown; error?: string }> {
   try {
-    const getArgString = (key: string, fallback = ""): string => {
-      if (typeof args === "string") return args
-      if (typeof args === "object" && args !== null) {
-        const val = args[key] ?? args.input ?? args.query ?? args.expression ?? args.location ?? args.code
-        return val !== undefined ? String(val) : fallback
-      }
-      return fallback
-    }
+    const parsedArgs: Record<string, unknown> = typeof args === "object" && args !== null ? args : { input: args }
+    const getStr = (key: string, fallback = "") => String(parsedArgs[key] ?? parsedArgs.symbol ?? parsedArgs.input ?? fallback)
+    const norm = toolName.toLowerCase().replace(/[^a-z0-9_]/g, "")
 
+    // Custom Tools
     const custom = customTools.find((t) => t.name === toolName)
     if (custom) {
-      const parsedArgs = typeof args === "object" && args !== null ? args : { input: args }
       const data = await executeCustomTool(custom, parsedArgs)
-      return { summary: `Executed custom tool: ${toolName}`, data }
+      return { summary: `Executed ${toolName}`, data }
     }
 
-    switch (toolName.toLowerCase().replace(/[^a-z0-9_]/g, "")) {
-      case "calculator": {
-        const expr = getArgString("expression", "0")
-        const data = executeCalculator(expr)
-        return { summary: `Calculated ${expr} = ${data.result}`, data }
-      }
-      case "weather_api":
-      case "weather": {
-        const loc = getArgString("location", "Tokyo")
-        const data = await executeWeather(loc)
-        return { summary: `Current conditions for ${data.location}`, data }
-      }
-      case "web_search":
-      case "search": {
-        const query = getArgString("query", "")
-        const data = await executeWebSearch(query)
-        return { summary: `${data.total} web results retrieved for "${query}"`, data }
-      }
-      case "code_interpreter": {
-        const code = getArgString("code", "")
-        const data = executeCodeInterpreter(code)
-        return { summary: data.exit_code === 0 ? "Execution completed successfully" : "Execution returned error", data }
-      }
-      default:
-        return { summary: `Tool ${toolName} finished`, data: { args, status: "ok" } }
+    // General Tools
+    if (norm === "calculator") {
+      const expr = getStr("expression", "0")
+      const data = executeCalculator(expr)
+      return { summary: `Calculated ${expr} = ${data.result}`, data }
     }
+    if (norm === "weather_api" || norm === "weather") {
+      const loc = getStr("location", "Tokyo")
+      const data = await executeWeather(loc)
+      return { summary: `Weather for ${data.location}`, data }
+    }
+    if (norm === "web_search" || norm === "search") {
+      const q = getStr("query", "")
+      const data = await executeWebSearch(q)
+      return { summary: `${data.total} web results for "${q}"`, data }
+    }
+    if (norm === "code_interpreter") {
+      const data = executeCodeInterpreter(getStr("code", ""))
+      return { summary: "Code executed", data }
+    }
+
+    // Binance Tools (Public Market Data)
+    if (norm.startsWith("binance_") || norm.startsWith("futures_")) {
+      const binance = resolveBinanceClient(binanceConfig)
+      const symbol = getStr("symbol", "BTCUSDT").toUpperCase()
+
+      if (norm.includes("price")) {
+        const data = await binance.futures.market.tickerPrice(symbol)
+        return { summary: `${symbol} Price: $${data.price}`, data }
+      }
+      if (norm.includes("24hr") || norm.includes("ticker")) {
+        const data = await binance.futures.market.ticker24hr(symbol)
+        return { summary: `${symbol} 24h: ${data.priceChangePercent}% ($${data.lastPrice})`, data }
+      }
+      if (norm.includes("klines")) {
+        const interval = (parsedArgs.interval as "1h" | "15m" | "1d") || "1h"
+        const limit = Number(parsedArgs.limit || 10)
+        const data = await binance.futures.market.klines(symbol, interval, { limit })
+        return { summary: `Retrieved ${data.length} klines for ${symbol} (${interval})`, data }
+      }
+      if (norm.includes("order_book") || norm.includes("depth")) {
+        const limit = Number(parsedArgs.limit || 10)
+        const data = await binance.futures.market.depth(symbol, limit)
+        return { summary: `Order book for ${symbol} (${data.bids.length} bids / ${data.asks.length} asks)`, data }
+      }
+      if (norm.includes("funding")) {
+        const data = await binance.futures.data.fundingRateHistory(symbol, { limit: 5 })
+        return { summary: `Funding rates for ${symbol}`, data }
+      }
+      if (norm.includes("open_interest")) {
+        const data = await binance.futures.data.openInterest(symbol)
+        return { summary: `Open interest for ${symbol}: ${data.openInterest}`, data }
+      }
+      if (norm.includes("ratio")) {
+        const period = (parsedArgs.period as "5m" | "15m" | "1h" | "4h" | "1d") || "1h"
+        const data = await binance.futures.data.globalLongShortAccountRatio(symbol, period, 5)
+        return { summary: `Long/short ratio for ${symbol}`, data }
+      }
+    }
+
+    // DhanHQ Indian Markets Tools
+    if (norm.startsWith("dhan_")) {
+      const dhan = await resolveDhanClient(dhanConfig)
+      const registry = new AgentToolRegistry({ client: dhan })
+
+      if (norm === "dhan_funds") {
+        const data = await dhan.funds.getLimit()
+        return { summary: `Dhan Funds available: ₹${data.availabelBalance ?? data.sodLimit ?? "Active"}`, data }
+      }
+      if (norm === "dhan_holdings") {
+        const data = await dhan.positions.listHoldings()
+        return { summary: `Holdings: ${Array.isArray(data) ? data.length : 0} securities`, data }
+      }
+      if (norm === "dhan_positions") {
+        const data = await dhan.positions.list()
+        return { summary: `Positions: ${Array.isArray(data) ? data.length : 0} open positions`, data }
+      }
+
+      const toolDef = registry.find(toolName) || registry.find(norm)
+      if (toolDef) {
+        const result = await registry.execute(toolDef.name, parsedArgs)
+        return { summary: `Dhan ${toolDef.name} result`, data: result }
+      }
+    }
+
+    return { summary: `Executed ${toolName}`, data: { status: "ok", args: parsedArgs } }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    return { summary: `Error executing ${toolName}`, data: { error: message }, error: message }
+    const msg = err instanceof Error ? err.message : String(err)
+    return { summary: `Error executing ${toolName}`, data: { error: msg }, error: msg }
   }
 }

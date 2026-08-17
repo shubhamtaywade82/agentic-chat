@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
               args: action.args,
             })
 
-            const toolResult = await executeLiveTool(action.toolName, action.args, customTools)
+            const toolResult = await executeLiveTool(action.toolName, action.args, customTools, config.dhan, config.binance)
 
             send({
               kind: "observation",
