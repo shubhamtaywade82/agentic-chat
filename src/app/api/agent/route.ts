@@ -10,12 +10,24 @@ interface ChatMessage {
 const KNOWN_PREFIXES = ["binance_", "futures_", "dhan_"]
 const KNOWN_EXACT = ["calculator", "weather_api", "weather", "web_search", "search", "code_interpreter"]
 
-function isKnownTool(name: string, customTools: CustomTool[] = []): boolean {
+function normalizeToolName(name: string, customTools: CustomTool[] = []): string | null {
   const norm = name.toLowerCase().replace(/[^a-z0-9_]/g, "")
-  if (KNOWN_EXACT.includes(norm)) return true
-  if (KNOWN_PREFIXES.some((p) => norm.startsWith(p))) return true
-  if (customTools.some((c) => c.name.toLowerCase() === norm)) return true
-  return false
+  if (KNOWN_EXACT.includes(norm)) return norm
+  if (KNOWN_PREFIXES.some((p) => norm.startsWith(p))) return norm
+  const matchedCustom = customTools.find((c) => c.name.toLowerCase() === norm)
+  if (matchedCustom) return matchedCustom.name
+
+  // Generic aliases mapped to concrete live tools
+  if (norm.includes("price") || norm.includes("rate") || norm === "binance") return "binance_price"
+  if (norm.includes("ticker") || norm.includes("stats")) return "binance_24hr_ticker"
+  if (norm.includes("kline") || norm.includes("candle") || norm.includes("chart")) return "binance_klines"
+  if (norm.includes("orderbook") || norm.includes("depth")) return "binance_order_book"
+  if (norm.includes("weather") || norm.includes("forecast") || norm.includes("temperature")) return "weather_api"
+  if (norm.includes("calc") || norm.includes("math") || norm.includes("eval")) return "calculator"
+  if (norm.includes("search") || norm.includes("web") || norm.includes("google") || norm.includes("wiki")) return "web_search"
+  if (norm.includes("code") || norm.includes("js") || norm.includes("sandbox")) return "code_interpreter"
+
+  return null
 }
 
 function inferToolFromContext(text: string, args: Record<string, unknown>, customTools: CustomTool[] = []): string | null {
@@ -97,8 +109,9 @@ function parseAction(text: string, customTools: CustomTool[] = []): { toolName: 
         toolName = inferToolFromContext(text, args, customTools) || ""
       }
 
-      if (toolName && isKnownTool(toolName, customTools)) {
-        return { toolName, args }
+      const normalized = normalizeToolName(toolName, customTools)
+      if (normalized) {
+        return { toolName: normalized, args }
       }
     } catch {
       // Continue to next parser
@@ -109,7 +122,8 @@ function parseAction(text: string, customTools: CustomTool[] = []): { toolName: 
   const stdMatch = text.match(/Action:\s*[`\[]?([a-zA-Z0-9_\-]+)[`\]]?(?:[\s\(]+(\{[\s\S]*?\})[\)]?)?/i)
   if (stdMatch) {
     const rawTool = stdMatch[1].trim()
-    if (isKnownTool(rawTool, customTools)) {
+    const normalized = normalizeToolName(rawTool, customTools)
+    if (normalized) {
       let args: Record<string, unknown> = {}
       if (stdMatch[2]) {
         try {
@@ -139,7 +153,7 @@ function parseAction(text: string, customTools: CustomTool[] = []): { toolName: 
           }
         }
       }
-      return { toolName: rawTool, args: typeof args === "object" && args !== null ? args : { input: args } }
+      return { toolName: normalized, args: typeof args === "object" && args !== null ? args : { input: args } }
     }
   }
 
@@ -147,20 +161,21 @@ function parseAction(text: string, customTools: CustomTool[] = []): { toolName: 
   const natMatch = text.match(/(?:using|calling|call|use)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)(?:[\s\S]*?(?:symbol|ticker|underlyingSymbol|query|location|code|securityId|expression)["\s:=]+([a-zA-Z0-9_\.\-]+))?/i)
   if (natMatch) {
     const rawTool = natMatch[1].toLowerCase().replace(/[^a-z0-9_]/g, "")
-    if (isKnownTool(rawTool, customTools)) {
+    const normalized = normalizeToolName(rawTool, customTools)
+    if (normalized) {
       const val = natMatch[2]?.replace(/^["'`]|["'`]$/g, "")
       let args: Record<string, unknown> = {}
       if (val) {
-        if (rawTool.includes("binance")) args = { symbol: val }
-        else if (rawTool.includes("dhan_market_summary")) args = { underlyingSymbol: val }
-        else if (rawTool.includes("dhan")) args = { securityId: val }
-        else if (rawTool.includes("weather")) args = { location: val }
-        else if (rawTool.includes("calc")) args = { expression: val }
-        else if (rawTool.includes("search")) args = { query: val }
-        else if (rawTool.includes("code")) args = { code: val }
+        if (normalized.includes("binance")) args = { symbol: val }
+        else if (normalized.includes("dhan_market_summary")) args = { underlyingSymbol: val }
+        else if (normalized.includes("dhan")) args = { securityId: val }
+        else if (normalized.includes("weather")) args = { location: val }
+        else if (normalized.includes("calc")) args = { expression: val }
+        else if (normalized.includes("search")) args = { query: val }
+        else if (normalized.includes("code")) args = { code: val }
         else args = { input: val }
       }
-      return { toolName: rawTool, args }
+      return { toolName: normalized, args }
     }
   }
 
@@ -276,19 +291,20 @@ export async function POST(req: NextRequest) {
 
             currentIteration += 1
           } else {
+            const finalAnswer = extractFinalAnswer(content)
             const isOnlyPlanOrThought =
-              (content.trim().startsWith("Plan:") || content.trim().startsWith("Thought:")) &&
-              !/Final Answer:/i.test(content)
+              !finalAnswer ||
+              ((content.trim().startsWith("Plan:") || content.trim().startsWith("Thought:")) &&
+                !/Final Answer:/i.test(content))
 
             if (isOnlyPlanOrThought && currentIteration < maxIters) {
               conversation.push({ role: "assistant", content })
               conversation.push({
                 role: "user",
-                content: "Good. Now proceed with your next step: provide your Thought and Action (e.g. Action: tool_name) to call the tool.",
+                content: "Observation reviewed. Please present your complete Final Answer in rich Markdown to the user.",
               })
               currentIteration += 1
             } else {
-              const finalAnswer = extractFinalAnswer(content)
               send({
                 kind: "answer",
                 iteration: currentIteration,

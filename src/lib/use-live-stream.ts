@@ -16,16 +16,13 @@ const DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 export function useLiveStream(initialSymbols: string[] = DEFAULT_SYMBOLS) {
   const [symbols, setSymbols] = useState<string[]>(initialSymbols)
   const [tickers, setTickers] = useState<Record<string, TickerData>>({})
-  const [status, setStatus] = useState<"connected" | "connecting" | "disconnected">("connecting")
+  const [wsStatus, setWsStatus] = useState<"connected" | "connecting" | "disconnected">("connecting")
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const prevPricesRef = useRef<Record<string, number>>({})
 
   useEffect(() => {
-    if (symbols.length === 0) {
-      setStatus("disconnected")
-      return
-    }
+    if (symbols.length === 0) return
 
     let isSubscribed = true
     const streams = symbols.map((s) => `${s.toLowerCase()}@ticker`).join("/")
@@ -34,7 +31,7 @@ export function useLiveStream(initialSymbols: string[] = DEFAULT_SYMBOLS) {
     wsRef.current = ws
 
     ws.onopen = () => {
-      if (isSubscribed) setStatus("connected")
+      if (isSubscribed) setWsStatus("connected")
     }
 
     ws.onmessage = (event) => {
@@ -73,14 +70,14 @@ export function useLiveStream(initialSymbols: string[] = DEFAULT_SYMBOLS) {
     }
 
     ws.onerror = () => {
-      if (isSubscribed) setStatus("disconnected")
+      if (isSubscribed) setWsStatus("disconnected")
     }
 
     ws.onclose = () => {
       if (isSubscribed) {
-        setStatus("disconnected")
+        setWsStatus("disconnected")
         reconnectTimeoutRef.current = setTimeout(() => {
-          if (isSubscribed) setStatus("connecting")
+          if (isSubscribed) setWsStatus("connecting")
         }, 4000)
       }
     }
@@ -108,6 +105,8 @@ export function useLiveStream(initialSymbols: string[] = DEFAULT_SYMBOLS) {
       return next
     })
   }
+
+  const status = symbols.length === 0 ? "disconnected" : wsStatus
 
   return {
     status,

@@ -224,7 +224,8 @@ export async function executeLiveTool(
     // Binance Tools (Public Market Data)
     if (norm.startsWith("binance_") || norm.startsWith("futures_")) {
       const binance = resolveBinanceClient(binanceConfig)
-      const symbol = getStr("symbol", "BTCUSDT").toUpperCase()
+      const rawSym = getStr("symbol", getStr("ticker", "BTCUSDT"))
+      const symbol = rawSym.replace(/[\/\-_\s]/g, "").toUpperCase() || "BTCUSDT"
 
       if (norm.includes("price")) {
         const data = await binance.futures.market.tickerPrice(symbol)
