@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 import { executeLiveTool, getToolSystemPrompt } from "@/lib/live-tools"
+import { formatMemoriesForPrompt } from "@/lib/memory-engine"
 import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/agent-types"
 
 interface ChatMessage {
@@ -217,7 +218,8 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const systemPrompt = `${config.systemPrompt}\n\n${getToolSystemPrompt(config.enabledTools, customTools)}`
+        const memoryBlock = formatMemoriesForPrompt(config.memories, query)
+        const systemPrompt = `${config.systemPrompt}${memoryBlock}\n\n${getToolSystemPrompt(config.enabledTools, customTools)}`
         const conversation: ChatMessage[] = [
           { role: "system", content: systemPrompt },
           ...history.map((h) => ({ role: h.role, content: h.content })),

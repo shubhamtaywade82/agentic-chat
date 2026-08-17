@@ -181,6 +181,19 @@ export interface BinanceConfig {
   testnet: boolean
 }
 
+export type MemoryCategory = "preference" | "learned_pattern" | "trading_fact" | "user_instruction"
+
+export interface AgentMemoryItem {
+  id: string
+  category: MemoryCategory
+  title: string
+  content: string
+  source: "user" | "agent_learning" | "session_distill"
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
 export interface AgentConfig {
   modelId: string
   systemPrompt: string
@@ -193,6 +206,7 @@ export interface AgentConfig {
   apiKeys: ProviderApiKey[]
   apiBaseUrl: string
   customTools: CustomTool[]
+  memories: AgentMemoryItem[]
   dhan: DhanConfig
   binance: BinanceConfig
 }
@@ -225,6 +239,38 @@ export const DEFAULT_CONFIG: AgentConfig = {
   apiKeys: [],
   apiBaseUrl: "http://localhost:11434",
   customTools: [],
+  memories: [
+    {
+      id: "mem_crypto_default",
+      category: "trading_fact",
+      title: "Binance USD-M Symbol Format",
+      content: "Binance futures trading pairs must be in uppercase without slashes (e.g. BTCUSDT, SOLUSDT, ETHUSDT).",
+      source: "agent_learning",
+      enabled: true,
+      createdAt: 1786950000000,
+      updatedAt: 1786950000000,
+    },
+    {
+      id: "mem_dhan_default",
+      category: "trading_fact",
+      title: "DhanHQ Indian Market Security IDs",
+      content: "NIFTY 50 index is securityId 13 under segment IDX_I. BANKNIFTY is securityId 25 under IDX_I. Equities belong to NSE_EQ or BSE_EQ.",
+      source: "agent_learning",
+      enabled: true,
+      createdAt: 1786950000000,
+      updatedAt: 1786950000000,
+    },
+    {
+      id: "mem_format_pref",
+      category: "preference",
+      title: "Tabular Market Data Presentation",
+      content: "Format price quotes, funding rates, open interest, and technical levels in clean markdown tables with clear column headers.",
+      source: "user",
+      enabled: true,
+      createdAt: 1786950000000,
+      updatedAt: 1786950000000,
+    },
+  ],
   dhan: {
     authMode: "endpoint",
     token: "",

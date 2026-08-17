@@ -1,9 +1,13 @@
 "use client"
 
 import { create } from "zustand"
-import type { AgentConfig, AgentMessage, ChatSession, CustomTool, LlmProvider, ModelOption, ProviderApiKey, TraceStep } from "@/lib/agent-types"
+import type {
+  AgentConfig, AgentMemoryItem, AgentMessage, ChatSession, CustomTool,
+  LlmProvider, ModelOption, ProviderApiKey, TraceStep
+} from "@/lib/agent-types"
 import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
+import { parseLearnCommand } from "@/lib/memory-engine"
 
 const STORAGE_KEY = "agentic_chat_sessions_v2"
 const CONFIG_KEY = "agentic_chat_config_v2"
@@ -34,6 +38,10 @@ interface AgentState {
   saveCustomTool: (tool: CustomTool) => void
   deleteCustomTool: (id: string) => void
   toggleCustomTool: (id: string) => void
+  addMemory: (item: Omit<AgentMemoryItem, "id" | "createdAt" | "updatedAt">) => void
+  updateMemory: (id: string, partial: Partial<AgentMemoryItem>) => void
+  deleteMemory: (id: string) => void
+  toggleMemory: (id: string) => void
   resetConfig: () => void
   setSidebarCollapsed: (v: boolean) => void
   toggleSidebar: () => void
@@ -66,7 +74,7 @@ const initialWelcomeMessage: AgentMessage = {
       startedAt: 1700000000000,
       finishedAt: 1700000000000,
       content:
-        "👋 Welcome to the **Agentic ReAct Runtime**.\n\nConnected directly to real LLM providers (**Ollama Local**, **Ollama Cloud**, **OpenAI**, **Groq**, etc.) with live tool execution.\n\n- **Ollama Local**: Zero API key needed.\n- **Ollama Cloud & Cloud Providers**: Multiple API key management.\n- **Filtered Models**: Clean list of chat models with embedding models excluded.",
+        "👋 Welcome to the **Agentic ReAct Runtime**.\n\nConnected directly to real LLM providers (**Ollama Local**, **Ollama Cloud**, **OpenAI**, **Groq**, etc.) with live tool execution.\n\n- **Ollama Local**: Zero API key needed.\n- **Ollama Cloud & Cloud Providers**: Multiple API key management.\n- **Live WebSocket Streams**: Real-time tick streams for Binance USD-M & Indian markets.\n- **Long-Term Memory & Learning**: Remembers trading facts, user preferences, and learned corrections (`/learn`).",
     },
   ],
 }
@@ -188,6 +196,40 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     get().updateConfig({ customTools: updated })
   },
 
+  addMemory: (item) => {
+    const newMem: AgentMemoryItem = {
+      id: `mem_${Date.now()}`,
+      category: item.category,
+      title: item.title,
+      content: item.content,
+      source: item.source || "user",
+      enabled: item.enabled !== false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    const updated = [newMem, ...(get().config.memories || [])]
+    get().updateConfig({ memories: updated })
+  },
+
+  updateMemory: (id, partial) => {
+    const updated = (get().config.memories || []).map((m) =>
+      m.id === id ? { ...m, ...partial, updatedAt: Date.now() } : m
+    )
+    get().updateConfig({ memories: updated })
+  },
+
+  deleteMemory: (id) => {
+    const updated = (get().config.memories || []).filter((m) => m.id !== id)
+    get().updateConfig({ memories: updated })
+  },
+
+  toggleMemory: (id) => {
+    const updated = (get().config.memories || []).map((m) =>
+      m.id === id ? { ...m, enabled: !m.enabled, updatedAt: Date.now() } : m
+    )
+    get().updateConfig({ memories: updated })
+  },
+
   resetConfig: () => {
     set({ config: { ...DEFAULT_CONFIG, enabledTools: { ...DEFAULT_CONFIG.enabledTools } } })
     if (typeof window !== "undefined") localStorage.removeItem(CONFIG_KEY)
@@ -240,6 +282,46 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sendUserMessage: async (text) => {
     if (get().isRunning) return
     const { config, activeSessionId, sessions } = get()
+
+    // Handle /learn command directly
+    const learnInfo = parseLearnCommand(text)
+    if (learnInfo) {
+      get().addMemory({
+        category: learnInfo.category,
+        title: learnInfo.title,
+        content: learnInfo.content,
+        source: "user",
+        enabled: true,
+      })
+      const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
+      const agentMsg: AgentMessage = {
+        id: `a_${Date.now()}`,
+        role: "agent",
+        query: text,
+        trace: [
+          {
+            id: `step_${Date.now()}`,
+            kind: "answer",
+            status: "completed",
+            iteration: 1,
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            content: `🧠 **Learned & Saved to Agent Memory!**\n\n- **Category**: \`${learnInfo.category}\`\n- **Title**: ${learnInfo.title}\n- **Pattern**: "${learnInfo.content}"\n\nI will remember this context and automatically apply it in all future reasoning turns.`,
+          },
+        ],
+        status: "completed",
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+        iterations: 1,
+        totalTokens: 0,
+      }
+      const updatedMsgs = [...get().messages, userMsg, agentMsg]
+      const updatedSessions = sessions.map((s) => (s.id === activeSessionId ? { ...s, messages: updatedMsgs, updatedAt: Date.now() } : s))
+      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSessions))
+      set({ messages: updatedMsgs, sessions: updatedSessions })
+      return
+    }
+
     const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
     const agentMsgId = `a_${Date.now()}`
     const agentMsg: AgentMessage = {
@@ -262,6 +344,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     set({ messages: [...get().messages, userMsg, agentMsg], isRunning: true, activeMessageId: agentMsgId })
 
+    let currentIter = 1
+    let tokens = 0
+
     try {
       const res = await fetch("/api/agent", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -272,8 +357,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
-      let currentIter = 1
-      let tokens = 0
 
       while (true) {
         const { value, done } = await reader.read()
@@ -290,40 +373,62 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
           try {
             const parsed = JSON.parse(rawData)
-            const stepId = `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
             currentIter = parsed.iteration || currentIter
-            tokens += (parsed.tokensIn || 0) + (parsed.tokensOut || 0) || 30
+            tokens += (parsed.tokensIn || 0) + (parsed.tokensOut || 0)
 
-            const step: TraceStep = {
-              ...parsed, id: stepId, status: "completed", iteration: currentIter,
-              startedAt: Date.now(), finishedAt: Date.now(), durationMs: 400,
-            }
-            set((s) => ({
-              messages: s.messages.map((m) => m.id === agentMsgId ? { ...m, trace: [...(m.trace ?? []), step], iterations: currentIter, totalTokens: tokens } : m),
-            }))
+            set((s) => {
+              const msgs = s.messages.map((m) => {
+                if (m.id !== agentMsgId) return m
+                const stepId = `step_${m.trace?.length || 0}_${Date.now()}`
+                const newStep: TraceStep = {
+                  id: stepId,
+                  kind: parsed.kind,
+                  status: "completed",
+                  iteration: parsed.iteration || currentIter,
+                  startedAt: Date.now(),
+                  finishedAt: Date.now(),
+                  ...parsed,
+                }
+                const nextTrace = [...(m.trace || []), newStep]
+                return {
+                  ...m,
+                  trace: nextTrace,
+                  iterations: currentIter,
+                  totalTokens: tokens,
+                }
+              })
+              return { messages: msgs }
+            })
           } catch {
-            // Ignore parse errors on split packets
+            // Ignore parse errors on chunks
           }
         }
       }
+
+      set((s) => {
+        const msgs = s.messages.map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now() } : m))
+        const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, messages: msgs, updatedAt: Date.now() } : sess))
+        if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+        return { messages: msgs, isRunning: false, activeMessageId: null, sessions: updated }
+      })
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err)
-      const errorStep: TraceStep = {
-        id: `err_${Date.now()}`, kind: "answer", status: "error", iteration: 1, startedAt: Date.now(), finishedAt: Date.now(),
-        content: `⚠️ **Connection Error:** ${errorMsg}\n\nEnsure provider **${config.provider}** is running.`,
-      }
-      set((s) => ({ messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, trace: [...(m.trace ?? []), errorStep] } : m)) }))
+      set((s) => {
+        const msgs = s.messages.map((m) => {
+          if (m.id !== agentMsgId) return m
+          const errStep: TraceStep = {
+            id: `err_${Date.now()}`,
+            kind: "answer",
+            status: "error",
+            iteration: currentIter,
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            content: `⚠️ **Agent Execution Error**: ${errorMsg}`,
+          }
+          return { ...m, trace: [...(m.trace || []), errStep], status: "error" as const, finishedAt: Date.now() }
+        })
+        return { messages: msgs, isRunning: false, activeMessageId: null }
+      })
     }
-
-    set((s) => {
-      const finalMsgs = s.messages.map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now() } : m))
-      const updatedSess = sessions.map((sess) =>
-        sess.id === activeSessionId
-          ? { ...sess, title: sess.title === "New Chat" || sess.title === "Initial Session" ? text.slice(0, 24) : sess.title, messages: finalMsgs, updatedAt: Date.now() }
-          : sess
-      )
-      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSess))
-      return { isRunning: false, activeMessageId: null, messages: finalMsgs, sessions: updatedSess }
-    })
   },
 }))

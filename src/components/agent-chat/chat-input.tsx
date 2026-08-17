@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, KeyboardEvent } from "react"
-import { Send, Square, Gauge, Sparkles } from "lucide-react"
+import { Send, Square, Gauge, Sparkles, Brain } from "lucide-react"
 import { useAgentStore } from "@/store/agent-store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -15,10 +15,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 const EXAMPLES = [
-  "What's the weather in Tokyo?",
-  "Calculate (15 * 23) + 47",
-  "Write a Python function for Fibonacci",
-  "Research how transformers work",
+  { label: "SOLUSDT Live Price", prompt: "SOLUSDT current live price today" },
+  { label: "NIFTY 50 Summary", prompt: "Summarize NIFTY current price and technicals" },
+  { label: "BTCUSDT 24h Stats", prompt: "BTCUSDT 24hr ticker volume and change" },
+  { label: "Teach Agent (/learn)", prompt: "/learn Always display crypto prices with 24h change % and USD/INR equivalents." },
 ]
 
 export function ChatInput() {
@@ -48,6 +48,8 @@ export function ChatInput() {
     }
   }
 
+  const isLearnCommand = text.trim().startsWith("/learn")
+
   return (
     <div className="border-t border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto max-w-3xl px-4 py-3">
@@ -56,25 +58,38 @@ export function ChatInput() {
           <div className="mb-2 flex flex-wrap gap-1.5">
             {EXAMPLES.map((ex) => (
               <button
-                key={ex}
-                onClick={() => setText(ex)}
+                key={ex.label}
+                onClick={() => setText(ex.prompt)}
                 className="group flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/20 hover:text-foreground"
               >
-                <Sparkles className="h-2.5 w-2.5 text-emerald-500" />
-                {ex}
+                {ex.prompt.startsWith("/learn") ? (
+                  <Brain className="h-2.5 w-2.5 text-purple-500" />
+                ) : (
+                  <Sparkles className="h-2.5 w-2.5 text-emerald-500" />
+                )}
+                {ex.label}
               </button>
             ))}
           </div>
         )}
 
-        <div className="flex items-end gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40 transition">
+        <div className={cn(
+          "flex items-end gap-2 rounded-2xl border p-2 shadow-sm transition",
+          isLearnCommand ? "border-purple-500/50 bg-purple-500/5 focus-within:ring-2 focus-within:ring-purple-500/40" : "border-border bg-card focus-within:ring-2 focus-within:ring-ring/40"
+        )}>
           <textarea
             ref={textareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder={isRunning ? "Agent is working…" : "Ask the agent anything…"}
+            placeholder={
+              isRunning
+                ? "Agent is working…"
+                : isLearnCommand
+                ? "Type a rule or preference for the agent to remember..."
+                : "Ask the agent or type /learn <instruction>…"
+            }
             disabled={isRunning}
             className="scroll-thin flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60"
           />
@@ -112,12 +127,17 @@ export function ChatInput() {
             size="sm"
             onClick={submit}
             disabled={!text.trim() || isRunning}
-            className="h-8 gap-1.5"
+            className={cn("h-8 gap-1.5", isLearnCommand && "bg-purple-600 hover:bg-purple-700 text-white")}
           >
             {isRunning ? (
               <>
                 <Square className="h-3.5 w-3.5 fill-current" />
                 Running
+              </>
+            ) : isLearnCommand ? (
+              <>
+                <Brain className="h-3.5 w-3.5" />
+                Learn
               </>
             ) : (
               <>
@@ -130,7 +150,8 @@ export function ChatInput() {
 
         <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
           Press <kbd className="rounded border border-border bg-muted px-1 font-mono">Enter</kbd> to send ·
-          <kbd className="ml-1 rounded border border-border bg-muted px-1 font-mono">Shift+Enter</kbd> for newline
+          <kbd className="ml-1 rounded border border-border bg-muted px-1 font-mono">Shift+Enter</kbd> for newline ·
+          Type <code className="text-emerald-500 font-mono">/learn ...</code> to teach persistent memory
         </p>
       </div>
     </div>

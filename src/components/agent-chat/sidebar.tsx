@@ -1,16 +1,27 @@
 "use client"
 
+import { useState } from "react"
 import { useAgentStore } from "@/store/agent-store"
 import { ReactLoopViz, derivePhase } from "./react-loop-viz"
 import { AgentConfigDialog } from "./agent-config-dialog"
-import { Activity, Coins, MessageSquare, PanelLeftClose, Plus, Trash2, X, Sliders, Wrench, Zap, Sparkles, PlayCircle } from "lucide-react"
+import { searchSessions } from "@/lib/memory-engine"
+import {
+  Activity, Coins, MessageSquare, PanelLeftClose, Plus, Trash2, X, Sliders,
+  Wrench, Brain, Search
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { AVAILABLE_TOOLS } from "@/lib/agent-types"
 import { cn } from "@/lib/utils"
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
-  const { messages, isRunning, activeMessageId, toggleSidebar, sessions, activeSessionId, createNewSession, switchSession, deleteSession, config } = useAgentStore()
+  const [sessionSearch, setSessionSearch] = useState("")
+  const {
+    messages, isRunning, activeMessageId, toggleSidebar, sessions,
+    activeSessionId, createNewSession, switchSession, deleteSession, config
+  } = useAgentStore()
+
   const activeMsg = messages.find((m) => m.id === activeMessageId) ?? (isRunning ? undefined : [...messages].reverse().find((m) => m.role === "agent"))
   const phase = derivePhase(activeMsg?.trace, isRunning)
   const iteration = activeMsg?.iterations ?? 0
@@ -23,6 +34,8 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
   const enabledBuiltinCount = Object.values(config.enabledTools).filter(Boolean).length
   const customCount = (config.customTools || []).filter((t) => t.enabled).length
+  const memoriesCount = (config.memories || []).filter((m) => m.enabled).length
+  const filteredSessions = searchSessions(sessions, sessionSearch)
 
   return (
     <div className="flex h-full flex-col bg-card/50">
@@ -81,16 +94,21 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             </div>
           </section>
 
-          {/* Active Tools Glance */}
+          {/* Memory & Tools Status */}
           <section className="rounded-xl border border-border bg-background/50 p-2.5 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <Wrench className="h-3 w-3" />
-                <span>Active Tools</span>
+                <Brain className="h-3 w-3 text-purple-500" />
+                <span>Memory & Tools</span>
               </div>
-              <span className="font-mono text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                {enabledBuiltinCount + customCount} ready
-              </span>
+              <div className="flex gap-1">
+                <span className="font-mono text-[9px] text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
+                  {memoriesCount} memories
+                </span>
+                <span className="font-mono text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                  {enabledBuiltinCount + customCount} tools
+                </span>
+              </div>
             </div>
             <div className="flex flex-wrap gap-1">
               {AVAILABLE_TOOLS.map((t) => {
@@ -110,35 +128,50 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             </div>
           </section>
 
-          {/* Chat Sessions Navigator */}
-          <section>
-            <div className="mb-1.5 flex items-center justify-between">
+          {/* Chat Sessions Navigator with Search */}
+          <section className="space-y-1.5">
+            <div className="flex items-center justify-between">
               <SectionLabel>Chat Sessions</SectionLabel>
               <Button variant="ghost" size="sm" onClick={createNewSession} className="h-5 gap-1 px-1.5 text-[10px] text-emerald-600 dark:text-emerald-400">
                 <Plus className="h-2.5 w-2.5" /> New
               </Button>
             </div>
+
+            <div className="relative">
+              <Search className="absolute left-2 top-1.5 h-3 w-3 text-muted-foreground" />
+              <Input
+                value={sessionSearch}
+                onChange={(e) => setSessionSearch(e.target.value)}
+                placeholder="Search past sessions..."
+                className="h-6 pl-6 text-[10px] bg-background/50"
+              />
+            </div>
+
             <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-border/70 bg-background/50 p-1.5">
-              {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => switchSession(s.id)}
-                  className={cn(
-                    "group flex cursor-pointer items-center justify-between rounded px-2 py-1 text-xs transition",
-                    s.id === activeSessionId ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  )}
-                >
-                  <span className="truncate max-w-[190px]">{s.title}</span>
-                  {sessions.length > 1 && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
-                      className="opacity-0 group-hover:opacity-100 hover:text-destructive transition p-0.5"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
+              {filteredSessions.length === 0 ? (
+                <div className="p-2 text-center text-[10px] text-muted-foreground">No sessions found</div>
+              ) : (
+                filteredSessions.map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => switchSession(s.id)}
+                    className={cn(
+                      "group flex cursor-pointer items-center justify-between rounded px-2 py-1 text-xs transition",
+                      s.id === activeSessionId ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    )}
+                  >
+                    <span className="truncate max-w-[190px]">{s.title}</span>
+                    {sessions.length > 1 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
+                        className="opacity-0 group-hover:opacity-100 hover:text-destructive transition p-0.5"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </section>
         </div>
@@ -150,7 +183,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           trigger={
             <Button variant="outline" size="sm" className="w-full justify-center gap-1.5 text-xs h-8 bg-background shadow-xs hover:bg-muted">
               <Sliders className="h-3.5 w-3.5 text-emerald-500" />
-              <span>Configure Providers & Loop</span>
+              <span>Configure Agent & Memory</span>
             </Button>
           }
         />
