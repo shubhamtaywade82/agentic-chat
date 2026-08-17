@@ -99,7 +99,7 @@ git commit -m "Add futures klines API route for candlestick chart data"
 
 **Interfaces:**
 - Consumes: `resolveBinanceClient` from `@/lib/live-tools`; `BinanceConfig` from `@/lib/agent-types`
-- Produces: `POST /api/futures/depth` accepting `{ symbol: string, limit?: number, binance?: BinanceConfig }`, returning `{ success: true, data: { lastUpdateId: number, bids: [string, string][], asks: [string, string][] } }` or `{ success: false, error: string }`. Consumed by Task 10's `OrderBookPanel`.
+- Produces: `POST /api/futures/depth` accepting `{ symbol: string, limit?: number, binance?: BinanceConfig }`, returning `{ success: true, data: { lastUpdateId: number, bids: { price: number, qty: number }[], asks: { price: number, qty: number }[] } }` or `{ success: false, error: string }`. Per the SDK's `DepthSnapshotSchema`, each level is already a parsed **object** (not a `[string, string]` tuple) with numeric fields coerced. Consumed by Task 10's `OrderBookPanel`.
 
 - [ ] **Step 1: Write the route**
 
@@ -145,7 +145,7 @@ curl -s -X POST localhost:3400/api/futures/depth \
   -H "Content-Type: application/json" \
   -d '{"symbol":"BTCUSDT","limit":5}' | head -c 400
 ```
-Expected: JSON with `"success":true`, `"data.bids"` and `"data.asks"` each a 5-item array of `[price, quantity]` string pairs
+Expected: JSON with `"success":true`, `"data.bids"` and `"data.asks"` each a 5-item array of objects with `"price"` and `"qty"` as numbers (not strings, not tuples)
 
 - [ ] **Step 4: Commit**
 
@@ -933,9 +933,14 @@ git commit -m "Add read-only positions panel with PnL"
 import { useEffect, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 
+interface DepthLevel {
+  price: number
+  qty: number
+}
+
 interface DepthData {
-  bids: [string, string][]
-  asks: [string, string][]
+  bids: DepthLevel[]
+  asks: DepthLevel[]
 }
 
 export function OrderBookPanel({ symbol }: { symbol: string }) {
@@ -983,19 +988,19 @@ export function OrderBookPanel({ symbol }: { symbol: string }) {
         <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
           <div>
             <div className="mb-1 text-muted-foreground">Bids</div>
-            {data.bids.map(([price, qty]) => (
+            {data.bids.map(({ price, qty }) => (
               <div key={price} className="flex justify-between text-emerald-500">
-                <span>{Number(price).toLocaleString()}</span>
-                <span>{Number(qty).toFixed(3)}</span>
+                <span>{price.toLocaleString()}</span>
+                <span>{qty.toFixed(3)}</span>
               </div>
             ))}
           </div>
           <div>
             <div className="mb-1 text-muted-foreground">Asks</div>
-            {data.asks.map(([price, qty]) => (
+            {data.asks.map(({ price, qty }) => (
               <div key={price} className="flex justify-between text-red-500">
-                <span>{Number(price).toLocaleString()}</span>
-                <span>{Number(qty).toFixed(3)}</span>
+                <span>{price.toLocaleString()}</span>
+                <span>{qty.toFixed(3)}</span>
               </div>
             ))}
           </div>
