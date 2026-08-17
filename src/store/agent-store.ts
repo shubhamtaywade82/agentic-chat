@@ -1,16 +1,12 @@
 "use client"
 
 import { create } from "zustand"
-import type { AgentConfig, AgentMessage, ChatSession, CustomTool, TraceStep } from "@/lib/agent-types"
-import { DEFAULT_CONFIG } from "@/lib/agent-types"
-import { buildScript, realizeStep, uid } from "@/lib/agent-simulator"
-import { executeLiveTool } from "@/lib/live-tools"
+import type { AgentConfig, AgentMessage, ChatSession, CustomTool, LlmProvider, ModelOption, TraceStep } from "@/lib/agent-types"
+import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
 
-const STORAGE_KEY = "agentic_chat_sessions_v1"
-const CONFIG_KEY = "agentic_chat_config_v1"
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const STORAGE_KEY = "agentic_chat_sessions_v2"
+const CONFIG_KEY = "agentic_chat_config_v2"
 
 interface AgentState {
   sessions: ChatSession[]
@@ -21,8 +17,12 @@ interface AgentState {
   speed: number
   config: AgentConfig
   sidebarCollapsed: boolean
+  models: ModelOption[]
+  isLoadingModels: boolean
+  isLiveModels: boolean
 
   // Actions
+  loadModels: (provider?: LlmProvider, baseUrl?: string, apiKey?: string) => Promise<void>
   sendUserMessage: (text: string) => Promise<void>
   setSpeed: (s: number) => void
   updateConfig: (partial: Partial<AgentConfig>) => void
@@ -52,6 +52,7 @@ const initialWelcomeMessage: AgentMessage = {
   totalTokens: 0,
   modelId: DEFAULT_CONFIG.modelId,
   systemPrompt: DEFAULT_CONFIG.systemPrompt,
+  provider: DEFAULT_CONFIG.provider,
   trace: [
     {
       id: "welcome_answer",
@@ -61,12 +62,11 @@ const initialWelcomeMessage: AgentMessage = {
       startedAt: Date.now(),
       finishedAt: Date.now(),
       content:
-        "👋 Welcome to the **Agentic ReAct Playground**.\n\nWatch me decompose tasks, execute tools (Live or Simulated), and observe results before synthesizing a final answer.\n\n- **Live Tools**: Run live calculations, real weather from Open-Meteo, and live Wikipedia search.\n- **Custom Tools**: Create your own JavaScript / HTTP API tools in the sidebar.\n- **Trace Export**: Download full execution traces in Markdown or JSON.",
+        "👋 Welcome to the **Agentic ReAct Runtime**.\n\nConnected directly to real LLM providers (**Ollama Local**, **Ollama Cloud**, **OpenAI**, **Groq**, etc.) with live tool execution.\n\n- **Live Tools**: Real Open-Meteo weather API, math evaluator, Wikipedia live search, and sandbox code interpreter.\n- **Autonomous ReAct**: Real-time Reason → Act → Observe execution cycles streamed from your configured model.\n- **Settings**: Click **Configure Agent** in the header to switch models, endpoints, or add custom tools.",
     },
   ],
 }
 
-// Safely load initial state from localStorage if available
 function loadSavedState(): { sessions: ChatSession[]; config: AgentConfig } {
   if (typeof window === "undefined") {
     return {
@@ -100,25 +100,57 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   speed: 1,
   config: saved.config,
   sidebarCollapsed: false,
+  models: AVAILABLE_MODELS.filter((m) => m.provider === saved.config.provider),
+  isLoadingModels: false,
+  isLiveModels: false,
+
+  loadModels: async (providerOverride, baseUrlOverride, apiKeyOverride) => {
+    const provider = providerOverride || get().config.provider
+    const apiBaseUrl = baseUrlOverride !== undefined ? baseUrlOverride : get().config.apiBaseUrl
+    const apiKey = apiKeyOverride !== undefined ? apiKeyOverride : get().config.apiKey
+
+    set({ isLoadingModels: true })
+    try {
+      const params = new URLSearchParams({ provider, apiBaseUrl, apiKey })
+      const res = await fetch(`/api/models?${params.toString()}`)
+      if (res.ok) {
+        const data = await res.json()
+        const fetchedList: ModelOption[] = data.models || []
+        const currentModel = get().config.modelId
+        const hasCurrent = fetchedList.some((m) => m.id === currentModel)
+        const nextModel = hasCurrent ? currentModel : fetchedList[0]?.id || currentModel
+
+        set({ models: fetchedList, isLiveModels: Boolean(data.isLive), isLoadingModels: false })
+        if (nextModel !== currentModel) {
+          get().updateConfig({ modelId: nextModel })
+        }
+        return
+      }
+    } catch {
+      // Fallback
+    }
+
+    const fallback = AVAILABLE_MODELS.filter((m) => m.provider === provider)
+    set({ models: fallback.length > 0 ? fallback : AVAILABLE_MODELS, isLoadingModels: false, isLiveModels: false })
+  },
 
   setSpeed: (s) => set({ speed: s }),
 
   updateConfig: (partial) => {
     set((s) => {
       const nextConfig = { ...s.config, ...partial }
-      if (typeof window !== "undefined") {
-        localStorage.setItem(CONFIG_KEY, JSON.stringify(nextConfig))
-      }
+      if (typeof window !== "undefined") localStorage.setItem(CONFIG_KEY, JSON.stringify(nextConfig))
       return { config: nextConfig }
     })
+
+    if (partial.provider || partial.apiBaseUrl !== undefined || partial.apiKey !== undefined) {
+      get().loadModels(partial.provider, partial.apiBaseUrl, partial.apiKey)
+    }
   },
 
   toggleTool: (name) => {
     get().updateConfig({
-      enabledTools: {
-        ...get().config.enabledTools,
-        [name]: get().config.enabledTools[name] === false ? true : false,
-      },
+      enabledTools: { ...get().config.enabledTools, [name]: get().config.enabledTools[name] === false ? true : false },
     })
   },
 
@@ -141,6 +173,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   resetConfig: () => {
     set({ config: { ...DEFAULT_CONFIG, enabledTools: { ...DEFAULT_CONFIG.enabledTools } } })
     if (typeof window !== "undefined") localStorage.removeItem(CONFIG_KEY)
+    get().loadModels(DEFAULT_CONFIG.provider, DEFAULT_CONFIG.apiBaseUrl, DEFAULT_CONFIG.apiKey)
   },
 
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
@@ -148,13 +181,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   createNewSession: () => {
     const newId = `sess_${Date.now()}`
-    const newSession: ChatSession = {
-      id: newId,
-      title: "New Chat",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      messages: [],
-    }
+    const newSession: ChatSession = { id: newId, title: "New Chat", createdAt: Date.now(), updatedAt: Date.now(), messages: [] }
     set((s) => {
       const sessions = [newSession, ...s.sessions]
       if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
@@ -164,9 +191,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   switchSession: (id) => {
     const session = get().sessions.find((s) => s.id === id)
-    if (session) {
-      set({ activeSessionId: id, messages: session.messages })
-    }
+    if (session) set({ activeSessionId: id, messages: session.messages })
   },
 
   deleteSession: (id) => {
@@ -201,7 +226,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   sendUserMessage: async (text) => {
     if (get().isRunning) return
-    const { config, speed, activeSessionId, sessions } = get()
+    const { config, activeSessionId, sessions } = get()
     const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
     const agentMsgId = `a_${Date.now()}`
     const agentMsg: AgentMessage = {
@@ -217,48 +242,83 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       systemPrompt: config.systemPrompt,
       temperature: config.temperature,
       maxIterations: config.maxIterations,
-      executionMode: config.executionMode,
+      provider: config.provider,
     }
 
     const updatedMessages = [...get().messages, userMsg, agentMsg]
     set({ messages: updatedMessages, isRunning: true, activeMessageId: agentMsgId })
 
-    const script = buildScript(text, config)
-    let iteration = 0
-    let tokens = 0
+    try {
+      const res = await fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: text, config, customTools: config.customTools }),
+      })
 
-    for (const scripted of script) {
-      if (scripted.type === "thinking") iteration += 1
-      await sleep(scripted.delay / speed)
-
-      // Live tool execution integration
-      if (config.executionMode === "live_tools" && scripted.type === "tool_call") {
-        const liveRes = await executeLiveTool(scripted.toolName, scripted.args, config.customTools)
-        const nextObsIndex = script.findIndex((s) => s.type === "observation" && "source" in s && s.source === scripted.toolName)
-        if (nextObsIndex !== -1) {
-          const obs = script[nextObsIndex] as { type: "observation"; summary: string; data: unknown }
-          obs.summary = liveRes.summary
-          obs.data = liveRes.data
-        }
+      if (!res.ok || !res.body) {
+        throw new Error(`API error (${res.status}): ${await res.text()}`)
       }
 
-      const step = realizeStep(scripted, iteration) as TraceStep
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      let currentIter = 1
+      let tokens = 0
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith("data:")) continue
+          const rawData = trimmed.slice(5).trim()
+          if (rawData === "[DONE]") break
+
+          try {
+            const parsed = JSON.parse(rawData)
+            const stepId = `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+            currentIter = parsed.iteration || currentIter
+            tokens += parsed.tokensIn || parsed.tokensOut ? (parsed.tokensIn || 0) + (parsed.tokensOut || 0) : 30
+
+            const step: TraceStep = {
+              ...parsed,
+              id: stepId,
+              status: "completed",
+              iteration: currentIter,
+              startedAt: Date.now(),
+              finishedAt: Date.now(),
+              durationMs: 400,
+            }
+
+            set((s) => ({
+              messages: s.messages.map((m) =>
+                m.id === agentMsgId
+                  ? { ...m, trace: [...(m.trace ?? []), step], iterations: currentIter, totalTokens: tokens }
+                  : m
+              ),
+            }))
+          } catch {
+            // Ignore parse errors on split packets
+          }
+        }
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      const errorStep: TraceStep = {
+        id: `err_${Date.now()}`,
+        kind: "answer",
+        status: "error",
+        iteration: 1,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+        content: `⚠️ **Connection Error:** ${errorMsg}\n\nEnsure provider **${config.provider}** is running.`,
+      }
       set((s) => ({
-        messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, trace: [...(m.trace ?? []), step], iterations: iteration } : m)),
-      }))
-
-      const workMs = scripted.type === "observation" ? 600 : scripted.type === "tool_call" ? 400 : 250
-      await sleep(workMs / speed)
-
-      const finishedAt = Date.now()
-      tokens += scripted.type === "thinking" ? (scripted.tokensIn ?? 40) + (scripted.tokensOut ?? 60) : 30
-
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === agentMsgId
-            ? { ...m, trace: (m.trace ?? []).map((t) => (t.id === step.id ? { ...t, status: "completed", finishedAt, durationMs: finishedAt - step.startedAt } : t)), totalTokens: tokens }
-            : m
-        ),
+        messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, trace: [...(m.trace ?? []), errorStep] } : m)),
       }))
     }
 

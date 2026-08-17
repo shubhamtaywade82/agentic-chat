@@ -1,5 +1,44 @@
 import type { CustomTool } from "./agent-types"
 
+// Returns structured instructions explaining available tools to the LLM
+export function getToolSystemPrompt(enabledTools: Record<string, boolean>, customTools: CustomTool[] = []): string {
+  const tools: string[] = []
+  if (enabledTools.calculator !== false) {
+    tools.push(`- calculator: {"expression": "string"} // Evaluate mathematical expressions (e.g. "15 * 23 + 47", "sqrt(144)")`)
+  }
+  if (enabledTools.weather_api !== false) {
+    tools.push(`- weather_api: {"location": "string"} // Get real-time weather & forecast for any city`)
+  }
+  if (enabledTools.web_search !== false) {
+    tools.push(`- web_search: {"query": "string"} // Search Wikipedia and web for live facts and news`)
+  }
+  if (enabledTools.code_interpreter !== false) {
+    tools.push(`- code_interpreter: {"code": "string", "language": "javascript"} // Execute sandbox JavaScript code`)
+  }
+  for (const c of customTools) {
+    if (c.enabled) {
+      tools.push(`- ${c.name}: ${c.parameters || "{}"} // ${c.description}`)
+    }
+  }
+
+  return `AVAILABLE TOOLS:
+${tools.join("\n")}
+
+REACT FORMAT PROTOCOL:
+When reasoning and using tools, use the following exact format:
+Plan:
+- Step 1
+- Step 2
+
+Thought: [Your step-by-step reasoning]
+Action: [tool_name]
+Action Input: {"param": "value"}
+(After receiving Observation, continue your Thought or provide Final Answer)
+
+Thought: [Reflect on observation]
+Final Answer: [Your complete response to the user]`
+}
+
 // Safe math evaluator using Function with sanitized math tokens
 export function executeCalculator(expression: string): { expression: string; result: number } {
   const sanitized = expression
@@ -20,7 +59,6 @@ export function executeCalculator(expression: string): { expression: string; res
     throw new Error("Invalid characters in math expression")
   }
 
-  // Safe evaluation bounded to arithmetic
   const result = Number(new Function(`"use strict"; return (${sanitized})`)())
   if (isNaN(result) || !isFinite(result)) {
     throw new Error("Math expression resulted in NaN or Infinity")
@@ -102,8 +140,8 @@ export async function executeWebSearch(query: string) {
   }
 }
 
-// Execute JavaScript or Python code sandbox
-export function executeCodeInterpreter(code: string, language = "javascript") {
+// Execute JavaScript code sandbox
+export function executeCodeInterpreter(code: string) {
   const logs: string[] = []
   const customConsole = {
     log: (...args: unknown[]) => logs.push(args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ")),
@@ -112,14 +150,10 @@ export function executeCodeInterpreter(code: string, language = "javascript") {
 
   const start = performance.now()
   try {
-    if (language === "javascript" || language === "js" || language === "ts") {
-      const fn = new Function("console", `"use strict"; ${code}`)
-      const returned = fn(customConsole)
-      const stdout = logs.join("\n") || (returned !== undefined ? String(returned) : "(no output)")
-      return { exit_code: 0, stdout, execution_ms: Math.round(performance.now() - start) }
-    }
-    // Simulated Python execution output for sandbox preview
-    return { exit_code: 0, stdout: logs.join("\n") || "Process executed with exit code 0", execution_ms: Math.round(performance.now() - start) }
+    const fn = new Function("console", `"use strict"; ${code}`)
+    const returned = fn(customConsole)
+    const stdout = logs.join("\n") || (returned !== undefined ? String(returned) : "(no output)")
+    return { exit_code: 0, stdout, execution_ms: Math.round(performance.now() - start) }
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err)
     return { exit_code: 1, stdout: logs.join("\n"), stderr: errorMsg, execution_ms: Math.round(performance.now() - start) }
@@ -142,7 +176,6 @@ export async function executeCustomTool(tool: CustomTool, args: Record<string, u
     return await res.json()
   }
 
-  // JavaScript execution mode
   const fn = new Function("args", `"use strict"; ${tool.code}`)
   return await fn(args)
 }
@@ -178,8 +211,7 @@ export async function executeLiveTool(
       }
       case "code_interpreter": {
         const code = String(args.code || "")
-        const lang = String(args.language || "javascript")
-        const data = executeCodeInterpreter(code, lang)
+        const data = executeCodeInterpreter(code)
         return { summary: data.exit_code === 0 ? "Execution completed successfully" : "Execution returned error", data }
       }
       default:

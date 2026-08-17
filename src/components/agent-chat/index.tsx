@@ -7,7 +7,7 @@ import { UserMessageView } from "./user-message"
 import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
 import { AgentConfigDialog } from "./agent-config-dialog"
-import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, PlayCircle, Sparkles, Settings } from "lucide-react"
+import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
@@ -18,10 +18,16 @@ export function AgentChat() {
   const activeMessageId = useAgentStore((s) => s.activeMessageId)
   const config = useAgentStore((s) => s.config)
   const clear = useAgentStore((s) => s.clear)
+  const loadModels = useAgentStore((s) => s.loadModels)
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Load provider models on initial mount
+  useEffect(() => {
+    loadModels()
+  }, [loadModels])
 
   // auto-scroll to bottom on new content
   useEffect(() => {
@@ -29,21 +35,6 @@ export function AgentChat() {
     if (!el) return
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [messages, activeMessageId, isRunning])
-
-  const modeBadge =
-    config.executionMode === "live_tools" ? (
-      <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
-        <Zap className="h-2.5 w-2.5" /> Live Tools
-      </Badge>
-    ) : config.executionMode === "live_llm" ? (
-      <Badge variant="outline" className="gap-1 border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-400 font-mono text-[10px]">
-        <Sparkles className="h-2.5 w-2.5" /> Live LLM
-      </Badge>
-    ) : (
-      <Badge variant="secondary" className="gap-1 font-mono text-[10px]">
-        <PlayCircle className="h-2.5 w-2.5" /> Simulation
-      </Badge>
-    )
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -83,7 +74,9 @@ export function AgentChat() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {modeBadge}
+          <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
+            <Zap className="h-2.5 w-2.5" /> Real LLM
+          </Badge>
 
           {/* Settings Backdrop Trigger in Header */}
           <AgentConfigDialog
@@ -136,7 +129,7 @@ export function AgentChat() {
       <footer className="flex h-7 shrink-0 items-center justify-between border-t border-border bg-background px-4 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Agent runtime online
+          Agent runtime online · Connected to {config.provider.replace(/_/g, " ")}
         </span>
         <span className="font-mono">ReAct = Reason + Act + Observe · loop until answer</span>
       </footer>
@@ -153,9 +146,9 @@ function EmptyState() {
           <Bot className="h-7 w-7" />
         </div>
       </div>
-      <h2 className="text-lg font-semibold">Start a conversation</h2>
+      <h2 className="text-lg font-semibold">Start an Agentic Conversation</h2>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-        Ask the agent anything. You'll see it think, call tools (live or simulated), observe results, and loop until it reaches a final answer.
+        Ask the agent anything. It communicates directly with your configured LLM, executes real tools, and visualizes the full ReAct loop in real-time.
       </p>
     </div>
   )

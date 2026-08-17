@@ -77,7 +77,7 @@ export interface AgentMessage {
   systemPrompt?: string
   temperature?: number
   maxIterations?: number
-  executionMode?: "simulated" | "live_tools" | "live_llm"
+  provider?: LlmProvider
 }
 
 export interface ToolDefinition {
@@ -129,17 +129,14 @@ export interface ModelOption {
 }
 
 export const AVAILABLE_MODELS: ModelOption[] = [
-  { id: "llama3.2", label: "Llama 3.2 (Ollama Local)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_local" },
-  { id: "deepseek-r1:7b", label: "DeepSeek R1 7B (Ollama Local)", contextWindow: 64_000, costPer1k: 0, provider: "ollama_local" },
-  { id: "qwen2.5-coder", label: "Qwen 2.5 Coder (Ollama Local)", contextWindow: 32_000, costPer1k: 0, provider: "ollama_local" },
+  { id: "llama3.2:3b", label: "Llama 3.2 3B (Ollama)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_local" },
+  { id: "qwen3.5:4b", label: "Qwen 3.5 4B (Ollama)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_local" },
   { id: "gpt-4o", label: "GPT-4o (OpenAI)", contextWindow: 128_000, costPer1k: 5, provider: "openai" },
   { id: "gpt-4o-mini", label: "GPT-4o mini (OpenAI)", contextWindow: 128_000, costPer1k: 0.15, provider: "openai" },
   { id: "claude-3-5-sonnet", label: "Claude 3.5 Sonnet (Anthropic)", contextWindow: 200_000, costPer1k: 3, provider: "anthropic" },
   { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash (Google)", contextWindow: 1_000_000, costPer1k: 0.1, provider: "gemini" },
-  { id: "llama-3.3-70b", label: "Llama 3.3 70B (Groq)", contextWindow: 128_000, costPer1k: 0.5, provider: "groq" },
+  { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Groq)", contextWindow: 128_000, costPer1k: 0.5, provider: "groq" },
 ]
-
-export type ExecutionMode = "simulated" | "live_tools" | "live_llm"
 
 export interface AgentConfig {
   modelId: string
@@ -148,7 +145,6 @@ export interface AgentConfig {
   maxIterations: number
   maxTokens: number
   enabledTools: Record<string, boolean>
-  executionMode: ExecutionMode
   provider: LlmProvider
   apiKey: string
   apiBaseUrl: string
@@ -163,20 +159,21 @@ export interface ChatSession {
   messages: AgentMessage[]
 }
 
-export const DEFAULT_SYSTEM_PROMPT = `You are a helpful, methodical ReAct agent.
-Decompose the user's request into a plan, then iterate through
-Thought → Action → Observation loops until you can produce a
-confident final answer. Use tools when they help; reason clearly
-about each observation.`
+export const DEFAULT_SYSTEM_PROMPT = `You are a methodical, autonomous ReAct agent.
+Follow the ReAct (Reasoning + Acting) loop:
+1. Plan: Decompose the request into steps.
+2. Thought: Reason about what action is needed.
+3. Action: Call tools when helpful to verify facts or execute calculations.
+4. Observation: Inspect tool output carefully.
+5. Final Answer: Provide a concise, helpful response.`
 
 export const DEFAULT_CONFIG: AgentConfig = {
-  modelId: "llama3.2",
+  modelId: "llama3.2:3b",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   temperature: 0.4,
   maxIterations: 6,
   maxTokens: 2048,
   enabledTools: Object.fromEntries(AVAILABLE_TOOLS.map((t) => [t.name, true])),
-  executionMode: "live_tools",
   provider: "ollama_local",
   apiKey: "",
   apiBaseUrl: "http://localhost:11434",
