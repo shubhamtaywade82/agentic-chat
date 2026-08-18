@@ -114,3 +114,40 @@ export function searchSessions(sessions: ChatSession[], query: string): ChatSess
     })
   })
 }
+
+// Generate a concise, relevant title for a chat session from user prompt
+export function generateSessionTitle(prompt: string): string {
+  if (!prompt || !prompt.trim()) return "New Chat"
+
+  let clean = prompt.trim()
+
+  // Handle /learn command
+  if (clean.startsWith("/learn")) {
+    const withoutSlash = clean.replace(/^\/learn\s+/i, "")
+    const shortText = withoutSlash.length > 30 ? `${withoutSlash.slice(0, 28)}...` : withoutSlash
+    return `Memory: ${shortText}`
+  }
+
+  // Remove common conversational preamble prefixes
+  const prefixRegex = /^(can\s+you\s+(please\s+)?|please\s+|what\s+(is|are)\s+(the\s+)?|how\s+to\s+|show\s+me\s+(the\s+)?|tell\s+me\s+about\s+|help\s+me\s+(with\s+)?|give\s+me\s+(the\s+)?|analyze\s+(the\s+)?|calculate\s+(the\s+)?|explain\s+(the\s+)?|check\s+(the\s+)?|find\s+(the\s+)?|get\s+(the\s+)?)/i
+  clean = clean.replace(prefixRegex, "")
+
+  // Remove markdown formatting and punctuation from edges
+  clean = clean.replace(/^[`"'#*\s]+|[`"'#*!?. \t\n\r]+$/g, "")
+
+  if (!clean) {
+    clean = prompt.trim().slice(0, 32)
+  }
+
+  // Capitalize first character
+  clean = clean.charAt(0).toUpperCase() + clean.slice(1)
+
+  // Truncate cleanly at word boundary
+  if (clean.length > 36) {
+    const truncated = clean.slice(0, 34)
+    const lastSpace = truncated.lastIndexOf(" ")
+    clean = (lastSpace > 16 ? truncated.slice(0, lastSpace) : truncated) + "..."
+  }
+
+  return clean || "Trading Chat"
+}

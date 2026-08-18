@@ -4,16 +4,32 @@ import { useState } from "react"
 import { useAgentStore } from "@/store/agent-store"
 import { AgentConfigDialog } from "./agent-config-dialog"
 import { searchSessions } from "@/lib/memory-engine"
-import { MessageSquare, PanelLeftClose, Plus, Trash2, X, Sliders, Search } from "lucide-react"
+import { MessageSquare, PanelLeftClose, Plus, Trash2, X, Sliders, Search, Pencil, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const [sessionSearch, setSessionSearch] = useState("")
-  const { sessions, activeSessionId, createNewSession, switchSession, deleteSession, toggleSidebar } = useAgentStore()
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState("")
+  const { sessions, activeSessionId, createNewSession, switchSession, deleteSession, renameSession, toggleSidebar } = useAgentStore()
 
   const filteredSessions = searchSessions(sessions, sessionSearch)
+
+  const handleStartRename = (s: { id: string; title: string }, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingId(s.id)
+    setEditTitle(s.title)
+  }
+
+  const handleSaveRename = (id: string, e?: React.FormEvent | React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    if (editTitle.trim()) {
+      renameSession(id, editTitle.trim())
+    }
+    setEditingId(null)
+  }
 
   return (
     <div className="flex h-full flex-col bg-card/50">
@@ -69,14 +85,48 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                     s.id === activeSessionId ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                   )}
                 >
-                  <span className="truncate max-w-[190px]">{s.title}</span>
-                  {sessions.length > 1 && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
-                      className="opacity-0 group-hover:opacity-100 hover:text-destructive transition p-0.5"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
+                  {editingId === s.id ? (
+                    <div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
+                      <Input
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveRename(s.id, e)
+                          if (e.key === "Escape") setEditingId(null)
+                        }}
+                        autoFocus
+                        className="h-5 text-[11px] py-0 px-1 flex-1 bg-background"
+                      />
+                      <button
+                        onClick={(e) => handleSaveRename(s.id, e)}
+                        className="p-0.5 text-emerald-400 hover:text-emerald-300"
+                        title="Save name"
+                      >
+                        <Check className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="truncate max-w-[170px]" title={s.title}>{s.title}</span>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                        <button
+                          onClick={(e) => handleStartRename(s, e)}
+                          className="hover:text-cyan-400 transition p-0.5 text-muted-foreground"
+                          title="Rename chat"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        {sessions.length > 1 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
+                            className="hover:text-destructive transition p-0.5 text-muted-foreground"
+                            title="Delete chat"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
               ))

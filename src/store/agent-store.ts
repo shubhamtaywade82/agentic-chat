@@ -7,7 +7,7 @@ import type {
 } from "@/lib/agent-types"
 import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
-import { parseLearnCommand } from "@/lib/memory-engine"
+import { parseLearnCommand, generateSessionTitle } from "@/lib/memory-engine"
 
 const STORAGE_KEY = "agentic_chat_sessions_v2"
 const CONFIG_KEY = "agentic_chat_config_v2"
@@ -48,6 +48,7 @@ interface AgentState {
   createNewSession: () => void
   switchSession: (id: string) => void
   deleteSession: (id: string) => void
+  renameSession: (id: string, newTitle: string) => void
   exportTrace: (messageId: string, format: "md" | "json") => void
   clear: () => void
 }
@@ -264,6 +265,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     })
   },
 
+  renameSession: (id, newTitle) => {
+    const trimmed = newTitle.trim()
+    if (!trimmed) return
+    set((s) => {
+      const updated = s.sessions.map((sess) => (sess.id === id ? { ...sess, title: trimmed, updatedAt: Date.now() } : sess))
+      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      return { sessions: updated }
+    })
+  },
+
   exportTrace: (messageId, format) => {
     const msg = get().messages.find((m) => m.id === messageId)
     if (!msg) return
@@ -282,6 +293,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sendUserMessage: async (text) => {
     if (get().isRunning) return
     const { config, activeSessionId, sessions } = get()
+    const currentSession = sessions.find((s) => s.id === activeSessionId)
+    const isDefaultTitle = !currentSession?.title || currentSession.title === "New Chat" || currentSession.title === "Initial Session" || currentSession.title.startsWith("sess_")
+    const sessionTitle = isDefaultTitle ? generateSessionTitle(text) : currentSession.title
 
     // Handle /learn command directly
     const learnInfo = parseLearnCommand(text)
@@ -316,7 +330,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         totalTokens: 0,
       }
       const updatedMsgs = [...get().messages, userMsg, agentMsg]
-      const updatedSessions = sessions.map((s) => (s.id === activeSessionId ? { ...s, messages: updatedMsgs, updatedAt: Date.now() } : s))
+      const updatedSessions = sessions.map((s) => (s.id === activeSessionId ? { ...s, title: sessionTitle, messages: updatedMsgs, updatedAt: Date.now() } : s))
       if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSessions))
       set({ messages: updatedMsgs, sessions: updatedSessions })
       return
@@ -342,7 +356,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       .filter((m) => m.content.trim().length > 0)
       .slice(-10)
 
-    set({ messages: [...get().messages, userMsg, agentMsg], isRunning: true, activeMessageId: agentMsgId })
+    const initialMsgs = [...get().messages, userMsg, agentMsg]
+    const initialSessions = sessions.map((sess) => (sess.id === activeSessionId ? { ...sess, title: sessionTitle, messages: initialMsgs, updatedAt: Date.now() } : sess))
+    if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(initialSessions))
+
+    set({ messages: initialMsgs, sessions: initialSessions, isRunning: true, activeMessageId: agentMsgId })
 
     let currentIter = 1
     let tokens = 0
@@ -407,7 +425,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
       set((s) => {
         const msgs = s.messages.map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now() } : m))
-        const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, messages: msgs, updatedAt: Date.now() } : sess))
+        const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, title: sessionTitle, messages: msgs, updatedAt: Date.now() } : sess))
         if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
         return { messages: msgs, isRunning: false, activeMessageId: null, sessions: updated }
       })
