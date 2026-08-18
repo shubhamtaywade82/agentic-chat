@@ -15,10 +15,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 const EXAMPLES = [
-  { label: "SOLUSDT Live Price", prompt: "SOLUSDT current live price today" },
+  { label: "Prop Scanner (SOL/ETH/XRP)", prompt: "Scan SOLUSDT, ETHUSDT, XRPUSDT, and BTCUSDT for high probability prop trade setups with exact entry, stop loss, and take profits." },
+  { label: "Evaluate SOLUSDT Setup", prompt: "Perform a deep prop trading evaluation on SOLUSDT. Identify market structure, demand/supply order blocks, exact entry, invalidation SL, and phased TP targets." },
+  { label: "Calculate Trade Risk", prompt: "Calculate position size and risk parameters for SOLUSDT with $10,000 balance, 1.5% risk, entry $182.50, and stop loss $179.80 at 10x leverage." },
   { label: "NIFTY 50 Summary", prompt: "Summarize NIFTY current price and technicals" },
-  { label: "BTCUSDT 24h Stats", prompt: "BTCUSDT 24hr ticker volume and change" },
-  { label: "Teach Agent (/learn)", prompt: "/learn Always display crypto prices with 24h change % and USD/INR equivalents." },
 ]
 
 export function ChatInput() {

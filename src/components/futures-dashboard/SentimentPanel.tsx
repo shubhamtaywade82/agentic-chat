@@ -15,8 +15,6 @@ export function SentimentPanel({ symbol }: { symbol: string }) {
 
   useEffect(() => {
     let cancelled = false
-    setData(null)
-    setError(null)
     fetch("/api/futures/sentiment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

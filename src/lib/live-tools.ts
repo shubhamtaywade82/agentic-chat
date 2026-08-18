@@ -1,4 +1,5 @@
 import type { BinanceConfig, CustomTool, DhanConfig } from "./agent-types"
+import { evaluatePropSetup, scanPropWatchlist, DEFAULT_PROP_WATCHLIST } from "./prop-engine"
 import * as DhanPkg from "@shubhamtaywade82/dhanhq-ts"
 import * as BinancePkg from "binance-client-ts"
 
@@ -73,6 +74,11 @@ export function getToolSystemPrompt(enabledTools: Record<string, boolean>, custo
   if (enabledTools.binance_funding_rate !== false) tools.push(`- binance_funding_rate: {"symbol": "string"} // Current and historical funding rates`)
   if (enabledTools.binance_open_interest !== false) tools.push(`- binance_open_interest: {"symbol": "string"} // Real-time total open interest`)
   if (enabledTools.binance_long_short_ratio !== false) tools.push(`- binance_long_short_ratio: {"symbol": "string", "period": "1h"} // Top trader & global long/short ratio`)
+
+  // Systematic Prop Trading & Algo Event Tools
+  if (enabledTools.prop_scan_setups !== false) tools.push(`- prop_scan_setups: {"mode": "intraday"|"swing", "symbols": ["SOLUSDT", "ETHUSDT", "XRPUSDT", "BTCUSDT"]} // Algorithmic multi-pair setup scanner with Entry, SL, TP1/2/3, and RRR`)
+  if (enabledTools.prop_evaluate_pair !== false) tools.push(`- prop_evaluate_pair: {"symbol": "SOLUSDT", "mode": "intraday"|"swing"} // Deep SMC/ICT setup evaluation for a single symbol with invalidation rules`)
+  if (enabledTools.prop_risk_calculator !== false) tools.push(`- prop_risk_calculator: {"accountBalance": 10000, "riskPercent": 1.5, "entryPrice": 182.5, "stopLoss": 179.8, "leverage": 10} // Calculate position units, margin, notional value, and risk`)
 
   // DhanHQ tools
   if (enabledTools.dhan_ltp !== false) tools.push(`- dhan_ltp: {"securityId": "1333", "exchangeSegment": "NSE_EQ"} // Last Traded Price for Indian stocks`)
@@ -265,6 +271,50 @@ export async function executeLiveTool(
         const period = (parsedArgs.period as "5m" | "15m" | "1h" | "4h" | "1d") || "1h"
         const data = await binance.futures.data.globalLongShortAccountRatio(symbol, period, 5)
         return { summary: `Long/short ratio for ${symbol}`, data }
+      }
+    }
+
+    // Systematic Prop Trading & Algo Event Tools
+    if (norm.startsWith("prop_")) {
+      if (norm === "prop_scan_setups" || norm === "prop_scan") {
+        const mode = (parsedArgs.mode as "intraday" | "swing") || "intraday"
+        const rawSyms = parsedArgs.symbols || parsedArgs.watchlist
+        const symbols = Array.isArray(rawSyms) && rawSyms.length > 0 ? rawSyms.map(String) : DEFAULT_PROP_WATCHLIST
+        const setups = await scanPropWatchlist(symbols, mode, binanceConfig)
+        const activeCount = setups.filter((s) => s.direction !== "NO_TRADE").length
+        return { summary: `Scanned ${symbols.length} pairs (${mode}): ${activeCount} setups identified`, data: setups }
+      }
+      if (norm === "prop_evaluate_pair" || norm === "prop_evaluate" || norm === "prop_setup") {
+        const sym = getStr("symbol", "SOLUSDT")
+        const mode = (parsedArgs.mode as "intraday" | "swing") || "intraday"
+        const setup = await evaluatePropSetup(sym, mode, binanceConfig)
+        return { summary: `${setup.symbol} (${mode}) Setup: ${setup.direction} (${setup.confluenceScore}/6 confluence)`, data: setup }
+      }
+      if (norm === "prop_risk_calculator" || norm === "prop_risk") {
+        const balance = Number(parsedArgs.accountBalance || parsedArgs.balance || 10000)
+        const riskPct = Number(parsedArgs.riskPercent || parsedArgs.riskPct || 1.5)
+        const entry = Number(parsedArgs.entryPrice || parsedArgs.entry || 100)
+        const stop = Number(parsedArgs.stopLoss || parsedArgs.stop || 98)
+        const lev = Math.max(1, Number(parsedArgs.leverage || 10))
+        const riskDollar = balance * (riskPct / 100)
+        const distancePct = Math.abs(entry - stop) / entry
+        const positionUnits = distancePct > 0 ? riskDollar / Math.abs(entry - stop) : 0
+        const notional = positionUnits * entry
+        const marginReq = notional / lev
+        const data = {
+          accountBalance: balance,
+          riskPercent: riskPct,
+          riskDollar: Number(riskDollar.toFixed(2)),
+          entryPrice: entry,
+          stopLoss: stop,
+          distancePct: Number((distancePct * 100).toFixed(2)),
+          leverage: `${lev}x`,
+          positionUnits: Number(positionUnits.toFixed(4)),
+          notionalValueUsd: Number(notional.toFixed(2)),
+          marginRequiredUsd: Number(marginReq.toFixed(2)),
+          safeMaxLeverage: Number((100 / Math.max(1, distancePct * 100)).toFixed(1)),
+        }
+        return { summary: `Risk calculated: $${riskDollar.toFixed(2)} risk (${riskPct}%) -> ${positionUnits.toFixed(3)} units`, data }
       }
     }
 

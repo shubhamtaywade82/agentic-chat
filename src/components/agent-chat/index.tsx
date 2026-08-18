@@ -14,6 +14,7 @@ import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings, LineChart } from 
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { DEFAULT_CONFIG } from "@/lib/agent-types"
 
 const emptySubscribe = () => () => {}
@@ -83,12 +84,12 @@ export function AgentChat() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <Link href="/dashboard">
-            <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+          <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+            <Link href="/dashboard">
               <LineChart className="h-3 w-3 text-muted-foreground" />
               <span className="hidden sm:inline">Dashboard</span>
-            </Button>
-          </Link>
+            </Link>
+          </Button>
 
           <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
             <Zap className="h-2.5 w-2.5" /> Real LLM
@@ -104,6 +105,9 @@ export function AgentChat() {
               </Button>
             }
           />
+
+          {/* Theme Toggle Button */}
+          <ThemeToggle />
 
           {messages.length > 0 && (
             <Button variant="ghost" size="sm" onClick={clear} className="h-7 gap-1 px-2 text-[10px] text-muted-foreground hover:text-destructive">

@@ -8,7 +8,7 @@ interface ChatMessage {
   content: string
 }
 
-const KNOWN_PREFIXES = ["binance_", "futures_", "dhan_"]
+const KNOWN_PREFIXES = ["binance_", "futures_", "dhan_", "prop_"]
 const KNOWN_EXACT = ["calculator", "weather_api", "weather", "web_search", "search", "code_interpreter"]
 
 function normalizeToolName(name: string, customTools: CustomTool[] = []): string | null {
@@ -17,6 +17,11 @@ function normalizeToolName(name: string, customTools: CustomTool[] = []): string
   if (KNOWN_PREFIXES.some((p) => norm.startsWith(p))) return norm
   const matchedCustom = customTools.find((c) => c.name.toLowerCase() === norm)
   if (matchedCustom) return matchedCustom.name
+
+  // Prop trading aliases
+  if (norm.includes("propscan") || norm.includes("scan_setup") || norm.includes("scansetup") || norm.includes("setups")) return "prop_scan_setups"
+  if (norm.includes("propeval") || norm.includes("evaluatesetup") || norm.includes("eval_pair")) return "prop_evaluate_pair"
+  if (norm.includes("proprisk") || norm.includes("riskcalc") || norm.includes("positionsize")) return "prop_risk_calculator"
 
   // Generic aliases mapped to concrete live tools
   if (norm.includes("price") || norm.includes("rate") || norm === "binance") return "binance_price"
@@ -36,6 +41,7 @@ function inferToolFromContext(text: string, args: Record<string, unknown>, custo
     if (new RegExp(`\\b${c.name}\\b`, "i").test(text)) return c.name
   }
   const known = [
+    "prop_scan_setups", "prop_evaluate_pair", "prop_risk_calculator",
     "binance_price", "binance_24hr_ticker", "binance_klines", "binance_order_book",
     "binance_funding_rate", "binance_open_interest", "binance_long_short_ratio",
     "dhan_market_summary", "dhan_ltp", "dhan_quote", "dhan_holdings", "dhan_positions", "dhan_funds",

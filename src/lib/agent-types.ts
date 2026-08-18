@@ -115,6 +115,11 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   { name: "binance_open_interest", description: "Get total open interest and historical statistics", icon: "pie-chart", category: "crypto" },
   { name: "binance_long_short_ratio", description: "Get global & top trader long/short position ratios", icon: "scale", category: "crypto" },
 
+  // Systematic Prop Trading & Algo Event Engine
+  { name: "prop_scan_setups", description: "Scan crypto futures watchlist (SOL, ETH, XRP, BTC) for systematic SMC/ICT trade setups", icon: "radar", category: "crypto" },
+  { name: "prop_evaluate_pair", description: "Deep quantitative evaluation of a pair with exact Entry, SL, TP1/2/3, RRR and invalidation", icon: "crosshair", category: "crypto" },
+  { name: "prop_risk_calculator", description: "Calculate exact position size, margin, and risk-to-reward ratio for a trade setup", icon: "shield-check", category: "crypto" },
+
   // DhanHQ Indian Equity & F&O Markets
   { name: "dhan_ltp", description: "Get real-time Last Traded Price for NSE, BSE, MCX symbols", icon: "indian-rupee", category: "indian_markets" },
   { name: "dhan_quote", description: "Get full market quote with OHLC and market depth", icon: "table", category: "indian_markets" },
@@ -219,13 +224,13 @@ export interface ChatSession {
   messages: AgentMessage[]
 }
 
-export const DEFAULT_SYSTEM_PROMPT = `You are a methodical, autonomous ReAct agent with direct access to live crypto market data (Binance USD-M) and Indian equity/F&O markets (DhanHQ).
+export const DEFAULT_SYSTEM_PROMPT = `You are a methodical, systematic prop trading ReAct agent with direct access to live crypto market data (Binance USD-M), Indian equity/F&O markets (DhanHQ), and algorithmic Smart Money Concepts (SMC) & ICT event engines.
 Follow the ReAct (Reasoning + Acting) loop:
 1. Plan: Decompose the request into logical steps.
 2. Thought: Reason about what action is needed.
-3. Action: Call tools when helpful to verify live prices, candlestick data, quotes, order book, or open interest.
+3. Action: Call tools when helpful to scan live setups (prop_scan_setups, prop_evaluate_pair), verify live prices, candlestick data, order book, funding rate, open interest, or compute risk (prop_risk_calculator).
 4. Observation: Inspect tool output carefully.
-5. Final Answer: Format your answer cleanly using rich GitHub-flavored Markdown (fenced code blocks with language tags, tables, bullet points, headers, bold/italic formatting).`
+5. Final Answer: When presenting trade setups, act as a disciplined prop trader. Always provide: Bias/Confluence, Entry Zone, Structural Stop Loss (SL), Phased Take Profits (TP1, TP2, TP3), Risk-to-Reward Ratio (RRR >= 2:1), and Invalidation conditions formatted in rich GitHub-flavored Markdown.`
 
 export const DEFAULT_CONFIG: AgentConfig = {
   modelId: "llama3.2:3b",

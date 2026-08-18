@@ -80,38 +80,44 @@ All new, under `src/components/futures-dashboard/`:
 
 3. **`PriceChart.tsx`** — candlestick chart via `lightweight-charts`.
    Two tabs: **Intraday** (1m/5m/15m/1h) and **Swing** (4h/1d/1w). Fetches
-   from `GET /api/futures/klines?symbol=&interval=&limit=`. Refetches on
+   from `POST /api/futures/klines`. Refetches on
    symbol or interval change; no live WS candle updates in v1 (REST
    refresh only — polling cadence: refetch on interval/symbol change, plus
    a 15s interval timer while the tab is visible).
 
 4. **`SentimentPanel.tsx`** — funding rate, open interest, long/short
-   ratio for `activeSymbol`, via `GET /api/futures/sentiment?symbol=`.
+   ratio for `activeSymbol`, via `POST /api/futures/sentiment`.
 
 5. **`PositionsPanel.tsx`** — open positions + unrealized PnL via
-   `GET /api/futures/positions`. If `config.binance.apiKey` is empty,
+   `POST /api/futures/positions`. If `config.binance.apiKey` is empty,
    renders an empty-state ("Add a Binance API key in Agent Config to see
    live positions") instead of calling the endpoint.
 
 6. **`OrderBookPanel.tsx`** — bid/ask depth for `activeSymbol` via
-   `GET /api/futures/depth?symbol=&limit=`.
+   `POST /api/futures/depth`.
 
 ## API Routes
 
 All under `src/app/api/futures/`, mirroring the existing
 `src/app/api/trading/test/route.ts` error-handling pattern
 (try/catch → `NextResponse.json({ success: false, error })`, 500 on
-failure). All accept `binance` config (apiKey/apiSecret/testnet) as
-query/body the same way `trading/test` does, or fall back to
-`process.env` if absent — same precedence `resolveBinanceClient` already
-implements.
+failure). All accept `binance` config (apiKey/apiSecret/testnet) in the
+**POST JSON body** — not as query params, which would put `apiSecret` in a
+URL for the positions route. `resolveBinanceClient` has no `process.env`
+fallback for Binance (unlike `resolveDhanClient`); absent credentials mean
+an unauthenticated client, which is fine for the three public routes.
 
 | Route | Method | SDK call | Notes |
 |---|---|---|---|
-| `/api/futures/klines` | GET | `client.futures.market.klines(symbol, interval, { limit })` | intraday/swing intervals from the UI tabs |
-| `/api/futures/depth` | GET | `client.futures.market.depth(symbol, limit)` | order book panel |
-| `/api/futures/sentiment` | GET | `client.futures.data.fundingRateHistory`, `.openInterest`, `.globalLongShortAccountRatio` (parallel) | combined into one response to avoid 3 client round-trips |
-| `/api/futures/positions` | GET | `client.futures.account.positionRisk()` | signed; requires apiKey+secret |
+| `/api/futures/klines` | POST | `client.futures.market.klines(symbol, interval, { limit })` | intraday/swing intervals from the UI tabs |
+| `/api/futures/depth` | POST | `client.futures.market.depth(symbol, limit)` | order book panel |
+| `/api/futures/sentiment` | POST | `client.futures.data.fundingRateHistory`, `.openInterest`, `.globalLongShortAccountRatio` (parallel) | combined into one response to avoid 3 client round-trips |
+| `/api/futures/positions` | POST | `client.futures.account.positionRisk()` | signed; requires apiKey+secret |
+
+Only `PositionsPanel` sends `binance`. The three market panels send just a
+symbol, so they always read **mainnet** even when `config.binance.testnet`
+is set — testnet positions would sit alongside mainnet prices. Acceptable
+for v1; pass `binance` to all four panels if testnet becomes a real workflow.
 
 No new WS server infra — ticks stay on the existing direct-to-Binance
 browser WS (`use-live-stream.ts`); everything else is REST via these
@@ -137,9 +143,11 @@ credentials source of truth.
   matching `trading/test/route.ts`'s existing pattern. No throws leak to
   the client.
 - UI panels: each panel owns its own loading/error/empty state. A failed
-  fetch shows an inline retry affordance in that panel only — one panel
+  fetch shows an inline error message in that panel only — one panel
   failing (e.g. sentiment endpoint down) never blanks the rest of the
-  dashboard.
+  dashboard. Polling panels (chart, order book, positions) clear the error
+  on the next successful poll; the sentiment panel has no retry until the
+  symbol changes (see follow-ups).
 - Positions panel specifically: missing API key is not an error state,
   it's an expected empty-state with a clear call to action.
 
@@ -160,6 +168,16 @@ element — no auth, no routing complexity. Single-user local tool.
 
 ## Out-of-scope follow-ups (not part of this plan)
 
+- Header symbol search/switcher (§Components 1) — not built; symbol
+  selection is watchlist-click only.
+- Watchlist add/remove symbols (§Components 2) — not built; the watchlist
+  shows `useLiveStream`'s five default symbols. The hook already exposes
+  `addSymbol`/`removeSymbol`, so this is UI-only work.
+- Explicit retry buttons on panel errors, and a manual refresh for the
+  sentiment panel (the only panel that doesn't poll).
+- Chart colors are hardcoded hex tuned for a dark background; the app
+  currently renders light-only (no `ThemeProvider` is mounted). Pull from
+  theme tokens whenever theming is wired up.
 - Order execution UI (would need the CLAUDE.md financial/safety-critical
   rules: Decimal math, max order size, kill switch, confirmations)
 - Wiring up `PaperTradingEngine` for simulated order entry

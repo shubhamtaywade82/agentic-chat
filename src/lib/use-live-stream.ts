@@ -7,7 +7,7 @@ export interface TickerData {
   high: number
   low: number
   volume: number
-  direction: "up" | "down" | "neutral"
+  direction: "up" | "down"
   updatedAt: number
 }
 
@@ -26,7 +26,8 @@ export function useLiveStream(initialSymbols: string[] = DEFAULT_SYMBOLS) {
 
     let isSubscribed = true
     const streams = symbols.map((s) => `${s.toLowerCase()}@ticker`).join("/")
-    const url = `wss://fstream.binance.com/stream?streams=${streams}`
+    // Connect to Binance multi-stream WebSocket for sub-second live ticks
+    const url = `wss://stream.binance.com:9443/stream?streams=${streams}`
     const ws = new WebSocket(url)
     wsRef.current = ws
 
@@ -48,22 +49,27 @@ export function useLiveStream(initialSymbols: string[] = DEFAULT_SYMBOLS) {
         const low = parseFloat(data.l)
         const volume = parseFloat(data.v)
         const prevPrice = prevPricesRef.current[symbol] || price
-        const direction: "up" | "down" | "neutral" = price > prevPrice ? "up" : price < prevPrice ? "down" : "neutral"
         prevPricesRef.current[symbol] = price
 
-        setTickers((prev) => ({
-          ...prev,
-          [symbol]: {
-            symbol,
-            price,
-            changePercent,
-            high,
-            low,
-            volume,
-            direction,
-            updatedAt: Date.now(),
-          },
-        }))
+        setTickers((prev) => {
+          const prevDir = prev[symbol]?.direction || "up"
+          const direction: "up" | "down" =
+            price > prevPrice ? "up" : price < prevPrice ? "down" : prevDir
+
+          return {
+            ...prev,
+            [symbol]: {
+              symbol,
+              price,
+              changePercent,
+              high,
+              low,
+              volume,
+              direction,
+              updatedAt: Date.now(),
+            },
+          }
+        })
       } catch {
         // Ignore ping parse
       }

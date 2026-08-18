@@ -21,25 +21,29 @@ export function PositionsPanel() {
 
   useEffect(() => {
     if (!binanceConfig?.apiKey || !binanceConfig?.apiSecret) {
-      setPositions(null)
-      setError(null)
       return
     }
     let cancelled = false
-    fetch("/api/futures/positions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ binance: binanceConfig }),
-    })
-      .then((res) => res.json())
-      .then((json) => {
-        if (cancelled) return
-        if (!json.success) throw new Error(json.error || "Failed to load positions")
-        setPositions(json.data)
+    const load = () => {
+      fetch("/api/futures/positions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ binance: binanceConfig }),
       })
-      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)))
+        .then((res) => res.json())
+        .then((json) => {
+          if (cancelled) return
+          if (!json.success) throw new Error(json.error || "Failed to load positions")
+          setError(null)
+          setPositions(json.data)
+        })
+        .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)))
+    }
+    load()
+    const timer = window.setInterval(load, 10000)
     return () => {
       cancelled = true
+      window.clearInterval(timer)
     }
   }, [binanceConfig])
 
