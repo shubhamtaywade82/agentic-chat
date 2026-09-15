@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
   try {
     // Ollama Local or Remote tags endpoint
     if (provider === "ollama_local" || provider === "ollama_cloud") {
-      const url = `${baseUrl || "http://localhost:11434"}/api/tags`
+      const normalizedBase = baseUrl.includes("api.ollama.com") ? baseUrl.replace("api.ollama.com", "ollama.com") : baseUrl
+      const url = `${normalizedBase || "http://localhost:11434"}/api/tags`
       const res = await fetch(url, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} })
       if (res.ok) {
         const data = await res.json()

@@ -144,7 +144,7 @@ export type LlmProvider = "ollama_local" | "ollama_cloud" | "openai" | "anthropi
 
 export const DEFAULT_PROVIDER_URLS: Record<LlmProvider, string> = {
   ollama_local: "http://localhost:11434",
-  ollama_cloud: "https://api.ollama.com",
+  ollama_cloud: "https://ollama.com",
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
   gemini: "https://generativelanguage.googleapis.com",

@@ -121,6 +121,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (parsed.systemPrompt?.includes("systematic prop trading ReAct agent")) {
         parsed.systemPrompt = DEFAULT_CONFIG.systemPrompt
       }
+      // Migrate deprecated api.ollama.com URL to direct ollama.com URL
+      if (parsed.apiBaseUrl?.includes("api.ollama.com")) {
+        parsed.apiBaseUrl = parsed.apiBaseUrl.replace("api.ollama.com", "ollama.com")
+      }
       parsed.mcpServers = parsed.mcpServers && Array.isArray(parsed.mcpServers)
         ? parsed.mcpServers
         : (DEFAULT_CONFIG.mcpServers || [])

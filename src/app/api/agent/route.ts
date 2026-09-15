@@ -62,6 +62,26 @@ function inferToolFromContext(text: string, args: Record<string, unknown>, custo
   return null
 }
 
+// Prune history to prevent exceeding model context window while retaining system prompt and latest user query
+function pruneConversation(messages: ChatMessage[], maxChars = 14000): ChatMessage[] {
+  if (messages.length <= 2) return messages
+  const system = messages[0]?.role === "system" ? messages[0] : null
+  const latestUser = messages[messages.length - 1]
+  const history = messages.slice(system ? 1 : 0, -1)
+
+  let totalChars = (system?.content.length || 0) + (latestUser?.content.length || 0)
+  const kept: ChatMessage[] = []
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    const len = history[i].content.length
+    if (totalChars + len > maxChars) break
+    totalChars += len
+    kept.unshift(history[i])
+  }
+
+  return system ? [system, ...kept, latestUser] : [...kept, latestUser]
+}
+
 // Call LLM endpoint (Ollama, OpenAI, Groq, Custom) using chat completions protocol
 async function callLlm(
   messages: ChatMessage[],
@@ -69,6 +89,9 @@ async function callLlm(
 ): Promise<{ text: string; tokensIn?: number; tokensOut?: number }> {
   const provider = config.provider
   let baseUrl = config.apiBaseUrl || DEFAULT_PROVIDER_URLS[provider] || "http://localhost:11434"
+  if (provider === "ollama_cloud" && baseUrl.includes("api.ollama.com")) {
+    baseUrl = baseUrl.replace("api.ollama.com", "ollama.com")
+  }
   if (provider === "ollama_local" || provider === "ollama_cloud") {
     if (!baseUrl.includes("/v1")) {
       baseUrl = `${baseUrl.replace(/\/$/, "")}/v1`
@@ -81,17 +104,29 @@ async function callLlm(
     headers["Authorization"] = `Bearer ${config.apiKey}`
   }
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     model: config.modelId,
-    messages,
+    messages: pruneConversation(messages),
     temperature: config.temperature,
     max_tokens: config.maxTokens,
     stream: false,
   }
 
+  // Set num_ctx to prevent local Ollama from defaulting to 4096 tokens and erroring out
+  if (provider === "ollama_local" || provider === "ollama_cloud") {
+    payload.options = {
+      num_ctx: 16384,
+    }
+  }
+
   const res = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(payload) })
   if (!res.ok) {
     const errText = await res.text().catch(() => "")
+    if (res.status === 401) {
+      throw new Error(
+        `LLM provider (${provider}) returned 401 Unauthorized. Remote cloud providers require an API key — please add your key in Agent Settings (⚙️), or switch to 'Ollama (Local)' to run locally with zero API keys.`
+      )
+    }
     throw new Error(`LLM provider (${provider}) returned status ${res.status}: ${errText.slice(0, 180)}`)
   }
 
