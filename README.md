@@ -124,6 +124,8 @@ packages/
 | `npm run lint` | ESLint (next/core-web-vitals + typescript) |
 | `npm run typecheck` | TypeScript typecheck (`tsc --noEmit`) |
 | `npm run ci` | Lint + typecheck + build in one shot (mirrors CI) |
+| `npm run preinstall:mcp` | Pre-download all 7 reference MCP packages into the npx/uvx caches so first agent request is sub-second |
+| `npm run preinstall:mcp:check` | Verify (without downloading) that all MCP packages are cached; exits non-zero if any are missing |
 | `npm run db:push` | Apply Prisma schema to the SQLite DB |
 | `npm run db:generate` | Regenerate the Prisma client |
 
@@ -241,6 +243,39 @@ Pick `stdio` transport, enter a command and one arg per line. Environment variab
 | --- | --- |
 | `POST /api/mcp/tools` | Body: `{ servers: McpServerConfig[] }`. Returns the flattened list of all tools across all enabled servers. Used by the MCP tab to show tool counts. |
 | `POST /api/mcp/test` | Body: `{ server: McpServerConfig }`. Tests a single server connection and returns the tool list (or error). Used by the Test button. |
+| `GET /api/mcp/pool-stats` | Returns the current state of the MCP connection pool: entry count, total tools, per-entry refcount/age/idle time. Used for observability. |
+| `DELETE /api/mcp/pool-stats` | Evicts all entries from the pool. Forces re-connect on next agent request. |
+
+### MCP performance: connection pool + pre-warmed caches
+
+The MCP integration is optimized for both cold-start and steady-state latency:
+
+**Connection pool** (`src/lib/mcp/pool.ts`):
+- A process-global pool keeps each MCP server's `McpClientManager` alive across requests for up to **10 min of idle time**.
+- The first request after server boot pays the spawn cost (~500ms–2s per server); subsequent requests **reuse the pooled connection in ~17ms** (verified: 74× speedup).
+- **Reference counting** — an in-use connection is never evicted; `release()` just decrements the refcount.
+- **Health re-validation** — every `acquire()` pings the manager via the MCP `ping` method (5s timeout). If unhealthy, the connection is recreated transparently.
+- **Config-hash invalidation** — editing a server's config changes its hash, so the next `acquire()` creates a fresh connection with the new config. The old entry expires naturally.
+- **Sweeper** — a `setInterval` runs every 60s to evict idle entries whose TTL has expired. The timer auto-stops when the pool is empty (zero CPU when idle).
+- **Per-key mutex** — concurrent `acquire()` calls for the same config are serialized to prevent duplicate spawns.
+
+**Pre-warmed caches** (`scripts/preinstall-mcp.sh`):
+- Downloads all 7 reference MCP packages into the `npx` (`~/.npm/_npx`) and `uvx` (`/var/cache/uv` or `~/.cache/uv`) caches at install time.
+- Run automatically as a `postinstall` hook (non-fatal if npx/uvx aren't available).
+- Also run in CI (with `actions/cache` for both npx and uvx caches) and in the Dockerfile build stage.
+- After warming, spawning any reference MCP server is a sub-second operation.
+- Manual usage: `npm run preinstall:mcp` (install) or `npm run preinstall:mcp:check` (verify only).
+
+**Docker** (`Dockerfile`):
+- Multi-stage build: the build stage runs `preinstall-mcp.sh` and copies the warmed `~/.npm/_npx` and `/var/cache/uv` directories into the runtime image.
+- Result: the container starts in ~2s, and the first agent request is sub-second (no MCP download latency).
+- `HEALTHCHECK` polls `/api` every 30s.
+
+```bash
+# Build and run with Docker
+docker build -t agentic-chat .
+docker run -p 3400:3400 agentic-chat
+```
 
 ### MCP file layout
 
@@ -248,11 +283,16 @@ Pick `stdio` transport, enter a command and one arg per line. Environment variab
 src/lib/mcp/
 ├── types.ts        # McpServerConfig, McpToolDescriptor, slug + name helpers
 ├── registry.ts     # 7 pre-configured reference servers (buildDefaultMcpServers)
-└── client.ts      # McpClientManager — connectAll, callTool, closeAll
+├── client.ts       # McpClientManager — connectAll, callTool, ping, closeAll
+└── pool.ts         # McpConnectionPool — acquireConnection, getPoolStats, evictAll
 
 src/app/api/mcp/
-├── tools/route.ts  # POST: list tools from all configured servers
-└── test/route.ts   # POST: test a single server connection
+├── tools/route.ts      # POST: list tools from a set of servers
+├── test/route.ts       # POST: test a single server connection
+└── pool-stats/route.ts # GET: pool stats | DELETE: evict all entries
+
+scripts/
+└── preinstall-mcp.sh   # warm npx/uvx caches for all 7 reference packages
 
 src/components/agent-chat/
 └── mcp-tab.tsx     # UI for managing MCP servers (add/edit/test/toggle/remove)

@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+*.log
+dev.log
+server.log
+.env*
+!.env.example
+download
+skills
+.zscripts/dev.pid
+tsconfig.tsbuildinfo

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server"
 import { executeLiveTool, getToolSystemPrompt } from "@/lib/live-tools"
 import { formatMemoriesForPrompt } from "@/lib/memory-engine"
 import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/agent-types"
-import { McpClientManager } from "@/lib/mcp/client"
+import { acquireConnection } from "@/lib/mcp/pool"
 import { isMcpToolName } from "@/lib/mcp/types"
 
 interface ChatMessage {
@@ -282,26 +282,20 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
       }
 
-      // ── MCP server bootstrap ────────────────────────────────────────────
-      // Spawn/connect to all enabled MCP servers up front so their tools
-      // are available to the LLM on the very first iteration. Failures are
-      // non-fatal: a single broken server is logged and skipped, the rest
-      // of the agent loop proceeds normally.
-      const mcpManager = new McpClientManager()
-      let mcpTools: Awaited<ReturnType<typeof mcpManager.connectAll>>["tools"] = []
-      const mcpErrors: { serverName: string; error: string }[] = []
-      try {
-        const mcpResult = await mcpManager.connectAll(config.mcpServers || [])
-        mcpTools = mcpResult.tools
-        for (const err of mcpResult.errors) {
-          mcpErrors.push({ serverName: err.serverName, error: err.error })
-        }
-      } catch (err) {
-        // connectAll already handles per-server failures; this catches
-        // unexpected total failures (e.g. SDK init error).
-        const msg = err instanceof Error ? err.message : String(err)
-        mcpErrors.push({ serverName: "(all)", error: msg })
-      }
+      // ── MCP server bootstrap (pooled) ────────────────────────────────
+      // Acquire a long-lived MCP connection from the process-global pool.
+      // The pool keeps each server's McpClientManager alive across requests
+      // for up to 10 min of idle time, so the spawn cost (~500ms–2s per
+      // server) is paid only on the very first request after server boot
+      // or after a connection expires. Subsequent requests reuse the
+      // pooled connection in ~0ms (plus a 5s ping health-check).
+      //
+      // The connection MUST be released via conn.release() when the
+      // request is done — otherwise the refcount never hits 0 and the
+      // sweeper can't evict idle entries.
+      const mcpConn = await acquireConnection(config.mcpServers || [])
+      const mcpTools = mcpConn.tools
+      const mcpManager = mcpConn.manager
 
       try {
         const memoryBlock = formatMemoriesForPrompt(config.memories, query)
@@ -457,10 +451,11 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))
         controller.close()
       } finally {
-        // Always close MCP server child processes / HTTP connections, even
-        // if the loop threw. Without this, spawned stdio servers would leak
-        // as orphan processes until the Next.js process exits.
-        await mcpManager.closeAll().catch(() => {})
+        // Release the pooled MCP connection. This decrements the refcount
+        // and updates lastUsedAt. The connection itself stays in the pool
+        // for future requests until its TTL expires (10 min idle) or the
+        // config changes (hash mismatch on next acquire).
+        mcpConn.release()
       }
     },
   })

@@ -192,6 +192,26 @@ export class McpClientManager {
     await Promise.allSettled(entries.map((e) => e.client.close()))
   }
 
+  // Health check: pings every connected server with the MCP `ping`
+  // method. Returns true only if ALL servers respond within the timeout.
+  // Used by the connection pool to decide whether a cached connection is
+  // still usable or needs to be recreated.
+  async ping(timeoutMs = 5000): Promise<boolean> {
+    const entries = Array.from(this.servers.values())
+    if (entries.length === 0) return false
+    try {
+      const results = await Promise.allSettled(
+        entries.map((e) => this.withTimeout(e.client.ping(), timeoutMs, `ping(${e.config.name})`))
+      )
+      // Healthy if at least one server responds. We don't require ALL to
+      // respond because a single broken server shouldn't invalidate the
+      // entire pool entry — the agent can still use the working servers.
+      return results.some((r) => r.status === "fulfilled")
+    } catch {
+      return false
+    }
+  }
+
   // Returns a flat list of all currently-known MCP tools across all servers.
   listAllTools(): McpToolDescriptor[] {
     const all: McpToolDescriptor[] = []

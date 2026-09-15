@@ -45,10 +45,35 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup uv (for uvx-based MCP servers)
+        # Installs uv so the preinstall script can warm the Python-based MCP
+        # packages (mcp-server-time, mcp-server-fetch, mcp-server-git).
+        # Cached across runs via actions/cache.
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: ""
+          version: "latest"
+
+      - name: Cache npx cache (~/.npm/_npx)
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm/_npx
+          key: npx-mcp-${{ runner.os }}-${{ hashFiles('scripts/preinstall-mcp.sh') }}
+          restore-keys: |
+            npx-mcp-${{ runner.os }}-
+
       - name: Install dependencies
         # `npm ci` requires a committed package-lock.json (which we have).
         # It's faster and more reproducible than `npm install`.
+        # The postinstall hook runs preinstall-mcp.sh (non-fatal if it fails).
         run: npm ci
+
+      - name: Warm MCP server caches
+        # Pre-download all 7 reference MCP packages so the smoke-test below
+        # doesn't have to wait 30-60s on first request. Non-fatal — if a
+        # package fails to download, the test still passes (just slower).
+        run: bash scripts/preinstall-mcp.sh || true
 
       - name: Lint (ESLint)
         run: npm run lint
@@ -61,6 +86,7 @@ jobs:
 
       - name: Smoke-test the built server
         # Boot the standalone server in the background, hit /api, then kill.
+        # Also exercises the MCP pool by hitting /api/mcp/pool-stats.
         # This catches runtime import errors that tsc can't see (e.g. a
         # dynamic require of a missing module).
         run: |
@@ -81,6 +107,9 @@ jobs:
           done
           # Verify the health-check payload
           curl -sS http://localhost:3000/api | jq -e '.status == "ok"' > /dev/null
+          # Verify the MCP pool stats endpoint responds (pool may be empty
+          # if no agent request has been made yet, but the endpoint should work)
+          curl -sS http://localhost:3000/api/mcp/pool-stats | jq -e '.totalEntries >= 0' > /dev/null
           kill $SERVER_PID 2>/dev/null || true
           wait $SERVER_PID 2>/dev/null || true
 
