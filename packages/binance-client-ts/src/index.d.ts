@@ -87,6 +87,7 @@ export interface PositionRiskEntry {
 }
 
 export interface FuturesMarketApi {
+  serverTime(): Promise<{ serverTime: number }>;
   tickerPrice(symbol: string): Promise<TickerPrice>;
   ticker24hr(symbol: string): Promise<Ticker24hr>;
   klines(symbol: string, interval: string, opts?: { limit?: number }): Promise<Kline[]>;

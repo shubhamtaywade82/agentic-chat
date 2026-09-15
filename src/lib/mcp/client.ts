@@ -82,7 +82,9 @@ export class McpClientManager {
     // the package; subsequent runs are fast.
     await this.withTimeout(client.connect(transport), 30_000, `connect(${cfg.name})`)
 
-    const toolsList = await this.withTimeout(client.listTools(), 10_000, `listTools(${cfg.name})`)
+    const toolsList = (await this.withTimeout(client.listTools(), 10_000, `listTools(${cfg.name})`)) as {
+      tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>
+    }
     const slugCount = this.countSlugCollision(slug)
     const finalSlug = slugCount === 0 ? slug : `${slug}_${slugCount}`
 

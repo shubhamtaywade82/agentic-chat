@@ -259,6 +259,7 @@ export async function POST(req: NextRequest) {
         const maxIters = config.maxIterations || 10
         let finalAnswerFound = false
         let planDetected = false
+        let planRequiresTool = false
         let toolCallMade = false
 
         while (currentIteration <= maxIters && !finalAnswerFound) {
@@ -270,6 +271,15 @@ export async function POST(req: NextRequest) {
             const planSteps = parsePlan(content)
             if (planSteps) {
               planDetected = true
+              planRequiresTool = planSteps.some((step) => {
+                const s = step.toLowerCase()
+                return (
+                  Object.keys(config.enabledTools || {}).some((t) => config.enabledTools[t] && s.includes(t.toLowerCase())) ||
+                  customTools.some((t) => s.includes(t.name.toLowerCase())) ||
+                  mcpTools.some((m) => s.includes(m.fullName.toLowerCase())) ||
+                  /\b(fetch|call tool|use tool|execute tool|lookup live|live data|order book)\b/i.test(s)
+                )
+              })
               send({
                 kind: "plan",
                 iteration: currentIteration,
@@ -344,11 +354,8 @@ export async function POST(req: NextRequest) {
               !finalAnswer ||
               ((content.trim().startsWith("Plan:") || content.trim().startsWith("Thought:")) &&
                 !/Final Answer:/i.test(content))
-            // A Plan promises tool-gathered data; a "Final Answer:" label alone isn't proof the
-            // model actually gathered it. Without this, an undetected tool intent (parseAction
-            // returning null on an unrecognized phrasing) silently starves the loop of real tool
-            // calls, and the model's stub answer ships to the user as if it were complete.
-            const answerPrematureVsPlan = planDetected && !toolCallMade
+            // Only consider an answer premature if the plan explicitly intended to fetch external tool data
+            const answerPrematureVsPlan = planRequiresTool && !toolCallMade
 
             if ((isOnlyPlanOrThought || answerPrematureVsPlan) && currentIteration < maxIters) {
               conversation.push({ role: "assistant", content })

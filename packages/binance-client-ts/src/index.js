@@ -49,6 +49,11 @@ class FuturesMarket {
     this.client = client;
   }
 
+  async serverTime() {
+    const data = await getJson(`${this.client.restBase}/fapi/v1/time`);
+    return { serverTime: data.serverTime };
+  }
+
   async tickerPrice(symbol) {
     const data = await getJson(`${this.client.restBase}/fapi/v1/ticker/price`, undefined, buildQuery({ symbol }));
     return { symbol: data.symbol, price: parseFloat(data.price), time: data.time };

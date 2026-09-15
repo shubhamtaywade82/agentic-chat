@@ -15,9 +15,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 const EXAMPLES = [
-  { label: "Prop Scanner (SOL/ETH/XRP)", prompt: "Scan SOLUSDT, ETHUSDT, XRPUSDT, and BTCUSDT for high probability prop trade setups with exact entry, stop loss, and take profits." },
-  { label: "Evaluate SOLUSDT Setup", prompt: "Perform a deep prop trading evaluation on SOLUSDT. Identify market structure, demand/supply order blocks, exact entry, invalidation SL, and phased TP targets." },
-  { label: "Calculate Trade Risk", prompt: "Calculate position size and risk parameters for SOLUSDT with $10,000 balance, 1.5% risk, entry $182.50, and stop loss $179.80 at 10x leverage." },
+  { label: "Ruby Design Patterns", prompt: "Explain the Singleton, Factory, and Observer design patterns in Ruby with clean code examples." },
+  { label: "Math & Calculation", prompt: "Calculate compound interest on $10,000 at 7% annual return over 10 years using the calculator." },
+  { label: "Prop Crypto Scanner", prompt: "Scan SOLUSDT, ETHUSDT, XRPUSDT, and BTCUSDT for high probability prop trade setups." },
   { label: "NIFTY 50 Summary", prompt: "Summarize NIFTY current price and technicals" },
 ]
 

@@ -117,6 +117,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // arrays/objects that the saved config might be missing (e.g. an old
       // localStorage entry from before MCP was added).
       const parsed = savedConfig ? { ...DEFAULT_CONFIG, ...JSON.parse(savedConfig) } : { ...DEFAULT_CONFIG }
+      // Migrate old cached prop-trading prompt to the new intent-first prompt
+      if (parsed.systemPrompt?.includes("systematic prop trading ReAct agent")) {
+        parsed.systemPrompt = DEFAULT_CONFIG.systemPrompt
+      }
       parsed.mcpServers = parsed.mcpServers && Array.isArray(parsed.mcpServers)
         ? parsed.mcpServers
         : (DEFAULT_CONFIG.mcpServers || [])

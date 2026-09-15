@@ -131,31 +131,34 @@ export function getToolSystemPrompt(
   return `AVAILABLE TOOLS:
 ${tools.join("\n")}
 
-TOOL DOMAIN ROUTING (CRITICAL):
-- CRYPTO ASSETS (e.g. SOLUSDT, BTCUSDT, ETHUSDT, XRPUSDT, BNBUSDT): ONLY use binance_* and prop_* tools. NEVER call dhan_* tools for crypto.
-- INDIAN EQUITIES / F&O (e.g. NIFTY, BANKNIFTY, RELIANCE, TCS): ONLY use dhan_* tools.
-- CONVERGENCE: Once a trade setup or technical scan observation is received, output Final Answer immediately. Do not call unrelated tools or check account balances unless specifically requested by the user.
+INTENT & DOMAIN ROUTING:
+- First, identify user intent. If the query asks about general concepts, software engineering, programming, or explanations, answer directly without invoking tools.
+- When live data, external calculations, or market setups are required:
+  - Math expressions: calculator
+  - Web research: web_search
+  - Code sandbox execution: code_interpreter
+  - Weather: weather_api
+  - Crypto Assets (e.g. SOLUSDT, BTCUSDT): binance_* and prop_* tools
+  - Indian Markets (e.g. NIFTY, RELIANCE): dhan_* tools
 
 REACT INSTRUCTIONS:
-Always think step-by-step using this exact format:
+Think step-by-step using this format:
+
+When a tool is needed:
 Plan:
 - Step 1: Description
-- Step 2: Description
-
-Thought: [Explain your reasoning]
+Thought: [Reasoning about intent and required tool]
 Action: tool_name
 Action Input: {"param": "value"}
+(After system Observation):
+Thought: [Evaluate observation result]
+Final Answer: [Your response in rich Markdown]
 
-(When you receive the Observation from the system):
-Thought: [Evaluate the observation result]
-Final Answer: [Your complete response formatted in rich GitHub-flavored Markdown. Use fenced code blocks (\`\`\`language) for code/JSON/HTML, markdown tables for tabular data, and lists/headers.]
-
-EXAMPLE:
+When NO tool is needed (e.g. general explanations, programming, concepts):
 Plan:
-- Step 1: Fetch trade setup for SOLUSDT
-Thought: I will use prop_evaluate_pair to scan for live SOLUSDT setups.
-Action: prop_evaluate_pair
-Action Input: {"symbol": "SOLUSDT", "mode": "intraday"}`
+- Step 1: Description
+Thought: [Direct reasoning without tool calls]
+Final Answer: [Your complete response in rich Markdown]`
 }
 
 // Math calculation helper
