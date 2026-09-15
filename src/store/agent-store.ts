@@ -3,11 +3,12 @@
 import { create } from "zustand"
 import type {
   AgentConfig, AgentMemoryItem, AgentMessage, ChatSession, CustomTool,
-  LlmProvider, ModelOption, ProviderApiKey, TraceStep
+  LlmProvider, ModelOption, ProviderApiKey, TraceStep, McpServerConfig
 } from "@/lib/agent-types"
 import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
 import { parseLearnCommand, generateSessionTitle } from "@/lib/memory-engine"
+import { mcpServerSlug } from "@/lib/mcp/types"
 
 const STORAGE_KEY = "agentic_chat_sessions_v2"
 const CONFIG_KEY = "agentic_chat_config_v2"
@@ -42,6 +43,11 @@ interface AgentState {
   updateMemory: (id: string, partial: Partial<AgentMemoryItem>) => void
   deleteMemory: (id: string) => void
   toggleMemory: (id: string) => void
+  // MCP server management
+  addMcpServer: (server: Omit<McpServerConfig, "id">) => void
+  updateMcpServer: (id: string, partial: Partial<McpServerConfig>) => void
+  removeMcpServer: (id: string) => void
+  toggleMcpServer: (id: string) => void
   resetConfig: () => void
   setSidebarCollapsed: (v: boolean) => void
   toggleSidebar: () => void
@@ -107,7 +113,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const savedSessions = localStorage.getItem(STORAGE_KEY)
       const savedConfig = localStorage.getItem(CONFIG_KEY)
-      const parsedConfig = savedConfig ? { ...DEFAULT_CONFIG, ...JSON.parse(savedConfig) } : DEFAULT_CONFIG
+      // Shallow-merge saved config over defaults, then backfill any nested
+      // arrays/objects that the saved config might be missing (e.g. an old
+      // localStorage entry from before MCP was added).
+      const parsed = savedConfig ? { ...DEFAULT_CONFIG, ...JSON.parse(savedConfig) } : { ...DEFAULT_CONFIG }
+      parsed.mcpServers = parsed.mcpServers && Array.isArray(parsed.mcpServers)
+        ? parsed.mcpServers
+        : (DEFAULT_CONFIG.mcpServers || [])
+      parsed.memories = parsed.memories || DEFAULT_CONFIG.memories || []
+      parsed.customTools = parsed.customTools || DEFAULT_CONFIG.customTools || []
+      parsed.apiKeys = parsed.apiKeys || DEFAULT_CONFIG.apiKeys || []
+      parsed.enabledTools = parsed.enabledTools || { ...DEFAULT_CONFIG.enabledTools }
+      parsed.dhan = { ...DEFAULT_CONFIG.dhan, ...(parsed.dhan || {}) }
+      parsed.binance = { ...DEFAULT_CONFIG.binance, ...(parsed.binance || {}) }
+
       const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
       const activeId = parsedSessions[0]?.id || initialSessionId
       const activeMsgs = parsedSessions[0]?.messages || [initialWelcomeMessage]
@@ -116,10 +135,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         sessions: parsedSessions,
         activeSessionId: activeId,
         messages: activeMsgs,
-        config: parsedConfig,
+        config: parsed,
         hydrated: true,
       })
-      get().loadModels(parsedConfig.provider, parsedConfig.apiBaseUrl, parsedConfig.apiKey)
+      get().loadModels(parsed.provider, parsed.apiBaseUrl, parsed.apiKey)
     } catch {
       set({ hydrated: true })
     }
@@ -231,6 +250,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     get().updateConfig({ memories: updated })
   },
 
+  // ── MCP server management ───────────────────────────────────────────
+  addMcpServer: (server) => {
+    const newServer: McpServerConfig = {
+      ...server,
+      id: `mcp_${Date.now()}_${mcpServerSlug(server.name || "server")}`,
+    }
+    const updated = [...(get().config.mcpServers || []), newServer]
+    get().updateConfig({ mcpServers: updated })
+  },
+
+  updateMcpServer: (id, partial) => {
+    const updated = (get().config.mcpServers || []).map((s) =>
+      s.id === id ? { ...s, ...partial } : s
+    )
+    get().updateConfig({ mcpServers: updated })
+  },
+
+  removeMcpServer: (id) => {
+    const updated = (get().config.mcpServers || []).filter((s) => s.id !== id)
+    get().updateConfig({ mcpServers: updated })
+  },
+
+  toggleMcpServer: (id) => {
+    const updated = (get().config.mcpServers || []).map((s) =>
+      s.id === id ? { ...s, enabled: !s.enabled } : s
+    )
+    get().updateConfig({ mcpServers: updated })
+  },
+
   resetConfig: () => {
     // Deep-copy nested objects so DEFAULT_CONFIG is never mutated by later
     // updateConfig calls (which would otherwise leak user edits back into the
@@ -244,6 +292,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         memories: (DEFAULT_CONFIG.memories || []).map((m) => ({ ...m })),
         dhan: { ...DEFAULT_CONFIG.dhan },
         binance: { ...DEFAULT_CONFIG.binance },
+        mcpServers: (DEFAULT_CONFIG.mcpServers || []).map((s) => ({
+          ...s,
+          args: s.args ? [...s.args] : undefined,
+          env: s.env ? { ...s.env } : undefined,
+          headers: s.headers ? { ...s.headers } : undefined,
+        })),
       },
     })
     if (typeof window !== "undefined") localStorage.removeItem(CONFIG_KEY)

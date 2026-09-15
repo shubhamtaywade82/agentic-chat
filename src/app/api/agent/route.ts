@@ -2,13 +2,15 @@ import { NextRequest } from "next/server"
 import { executeLiveTool, getToolSystemPrompt } from "@/lib/live-tools"
 import { formatMemoriesForPrompt } from "@/lib/memory-engine"
 import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/agent-types"
+import { McpClientManager } from "@/lib/mcp/client"
+import { isMcpToolName } from "@/lib/mcp/types"
 
 interface ChatMessage {
   role: "system" | "user" | "assistant"
   content: string
 }
 
-const KNOWN_PREFIXES = ["binance_", "futures_", "dhan_", "prop_"]
+const KNOWN_PREFIXES = ["binance_", "futures_", "dhan_", "prop_", "mcp_"]
 const KNOWN_EXACT = ["calculator", "weather_api", "weather", "web_search", "search", "code_interpreter"]
 
 function normalizeToolName(name: string, customTools: CustomTool[] = []): string | null {
@@ -223,9 +225,30 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
       }
 
+      // ── MCP server bootstrap ────────────────────────────────────────────
+      // Spawn/connect to all enabled MCP servers up front so their tools
+      // are available to the LLM on the very first iteration. Failures are
+      // non-fatal: a single broken server is logged and skipped, the rest
+      // of the agent loop proceeds normally.
+      const mcpManager = new McpClientManager()
+      let mcpTools: Awaited<ReturnType<typeof mcpManager.connectAll>>["tools"] = []
+      const mcpErrors: { serverName: string; error: string }[] = []
+      try {
+        const mcpResult = await mcpManager.connectAll(config.mcpServers || [])
+        mcpTools = mcpResult.tools
+        for (const err of mcpResult.errors) {
+          mcpErrors.push({ serverName: err.serverName, error: err.error })
+        }
+      } catch (err) {
+        // connectAll already handles per-server failures; this catches
+        // unexpected total failures (e.g. SDK init error).
+        const msg = err instanceof Error ? err.message : String(err)
+        mcpErrors.push({ serverName: "(all)", error: msg })
+      }
+
       try {
         const memoryBlock = formatMemoriesForPrompt(config.memories, query)
-        const systemPrompt = `${config.systemPrompt}${memoryBlock}\n\n${getToolSystemPrompt(config.enabledTools, customTools)}`
+        const systemPrompt = `${config.systemPrompt}${memoryBlock}\n\n${getToolSystemPrompt(config.enabledTools, customTools, mcpTools)}`
         const conversation: ChatMessage[] = [
           { role: "system", content: systemPrompt },
           ...history.map((h) => ({ role: h.role, content: h.content })),
@@ -292,7 +315,12 @@ export async function POST(req: NextRequest) {
             })
 
             toolCallMade = true
-            const toolResult = await executeLiveTool(action.toolName, action.args, customTools, config.dhan, config.binance)
+
+            // Route to MCP manager if the tool name uses the mcp__ prefix,
+            // otherwise dispatch to the built-in live-tools.
+            const toolResult = isMcpToolName(action.toolName)
+              ? await mcpManager.callTool(action.toolName, action.args)
+              : await executeLiveTool(action.toolName, action.args, customTools, config.dhan, config.binance)
 
             send({
               kind: "observation",
@@ -361,6 +389,11 @@ export async function POST(req: NextRequest) {
         })
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))
         controller.close()
+      } finally {
+        // Always close MCP server child processes / HTTP connections, even
+        // if the loop threw. Without this, spawned stdio servers would leak
+        // as orphan processes until the Next.js process exits.
+        await mcpManager.closeAll().catch(() => {})
       }
     },
   })

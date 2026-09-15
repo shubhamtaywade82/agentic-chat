@@ -23,6 +23,7 @@ export function AgentRuntimePanel() {
   const enabledBuiltinCount = Object.values(config.enabledTools).filter(Boolean).length
   const customCount = (config.customTools || []).filter((t) => t.enabled).length
   const memoriesCount = (config.memories || []).filter((m) => m.enabled).length
+  const mcpEnabledCount = (config.mcpServers || []).filter((s) => s.enabled).length
 
   return (
     <div className="flex h-full flex-col bg-card/50">
@@ -86,6 +87,9 @@ export function AgentRuntimePanel() {
                 <span className="font-mono text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
                   {enabledBuiltinCount + customCount} tools
                 </span>
+                <span className="font-mono text-[9px] text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">
+                  {mcpEnabledCount} MCP
+                </span>
               </div>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -103,6 +107,15 @@ export function AgentRuntimePanel() {
                   </span>
                 )
               })}
+              {(config.mcpServers || []).filter((s) => s.enabled).map((s) => (
+                <span
+                  key={s.id}
+                  className="px-1.5 py-0.5 rounded font-mono text-[9px] bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30"
+                  title={`MCP server: ${s.name} (${s.transport})`}
+                >
+                  mcp:{s.name}
+                </span>
+              ))}
             </div>
           </section>
         </div>

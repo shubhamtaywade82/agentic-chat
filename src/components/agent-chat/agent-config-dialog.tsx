@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Settings, Cpu, Terminal, Wrench, RotateCcw,
   Sliders, Check, Trash2, Server, Cloud, Zap, Sparkles, RefreshCw, Loader2, KeyRound, Plus,
-  TrendingUp, Brain
+  TrendingUp, Brain, Plug
 } from "lucide-react"
 import { useAgentStore } from "@/store/agent-store"
 import { AVAILABLE_TOOLS, DEFAULT_PROVIDER_URLS, LlmProvider } from "@/lib/agent-types"
@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge"
 import { CustomToolModal } from "./custom-tool-modal"
 import { TradingTab } from "./trading-tab"
 import { MemoriesTab } from "./memories-tab"
+import { McpTab } from "./mcp-tab"
 import { cn } from "@/lib/utils"
 
 export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
@@ -88,7 +89,7 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
           <Tabs defaultValue="model" className="w-full">
-            <TabsList className="grid w-full grid-cols-5 mb-4">
+            <TabsList className="grid w-full grid-cols-6 mb-4">
               <TabsTrigger value="model" className="gap-1 text-xs">
                 <Cpu className="h-3.5 w-3.5" /> Model
               </TabsTrigger>
@@ -97,6 +98,9 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
               </TabsTrigger>
               <TabsTrigger value="memories" className="gap-1 text-xs">
                 <Brain className="h-3.5 w-3.5" /> Memory
+              </TabsTrigger>
+              <TabsTrigger value="mcp" className="gap-1 text-xs">
+                <Plug className="h-3.5 w-3.5" /> MCP
               </TabsTrigger>
               <TabsTrigger value="parameters" className="gap-1 text-xs">
                 <Sliders className="h-3.5 w-3.5" /> Persona
@@ -233,7 +237,12 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
               <MemoriesTab />
             </TabsContent>
 
-            {/* TAB 4: Persona & Parameters */}
+            {/* TAB 4: MCP Servers */}
+            <TabsContent value="mcp">
+              <McpTab />
+            </TabsContent>
+
+            {/* TAB 5: Persona & Parameters */}
             <TabsContent value="parameters" className="space-y-4">
               <div>
                 <Label className="text-xs font-semibold flex items-center gap-1.5 mb-1.5">

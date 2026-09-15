@@ -2,6 +2,7 @@ import type { BinanceConfig, CustomTool, DhanConfig } from "./agent-types"
 import { evaluatePropSetup, scanPropWatchlist, DEFAULT_PROP_WATCHLIST } from "./prop-engine"
 import * as DhanPkg from "@shubhamtaywade82/dhanhq-ts"
 import * as BinancePkg from "binance-client-ts"
+import type { McpToolDescriptor } from "./mcp/types"
 
 // Resolves the named exports across CommonJS / ESM / default interop variants
 // for the DhanHQ and Binance SDK packages. Both packages may export their
@@ -76,7 +77,11 @@ export function normalizeArgs(args: Record<string, unknown> | string): Record<st
 }
 
 // Returns structured instructions explaining available tools to the LLM
-export function getToolSystemPrompt(enabledTools: Record<string, boolean>, customTools: CustomTool[] = []): string {
+export function getToolSystemPrompt(
+  enabledTools: Record<string, boolean>,
+  customTools: CustomTool[] = [],
+  mcpTools: McpToolDescriptor[] = []
+): string {
   const tools: string[] = []
 
   // General tools
@@ -110,6 +115,17 @@ export function getToolSystemPrompt(enabledTools: Record<string, boolean>, custo
 
   for (const c of customTools) {
     if (c.enabled) tools.push(`- ${c.name}: ${c.parameters || "{}"} // ${c.description}`)
+  }
+
+  // MCP tools — appended after built-in tools. Each MCP tool uses the
+  // mcp__<server>__<tool> naming convention so the agent's Action line
+  // can be unambiguously routed back to the originating MCP server.
+  for (const m of mcpTools) {
+    const schemaStr = m.inputSchema && typeof m.inputSchema === "object"
+      ? JSON.stringify(m.inputSchema)
+      : "{}"
+    const truncated = schemaStr.length > 200 ? schemaStr.slice(0, 200) + "..." : schemaStr
+    tools.push(`- ${m.fullName}: ${truncated} // [MCP:${m.serverName}] ${m.description}`)
   }
 
   return `AVAILABLE TOOLS:

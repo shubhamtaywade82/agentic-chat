@@ -1,5 +1,13 @@
 // Core types for the agentic ReAct loop visualization
 
+import { buildDefaultMcpServers } from "@/lib/mcp/registry"
+import type { McpServerConfig } from "@/lib/mcp/types"
+
+// Re-export McpServerConfig so consumers of agent-types don't need a second
+// import path. This is the canonical public type surface for the agent
+// config + MCP integration.
+export type { McpServerConfig } from "@/lib/mcp/types"
+
 export type StepStatus = "pending" | "running" | "completed" | "error"
 
 export type StepKind =
@@ -214,6 +222,10 @@ export interface AgentConfig {
   memories: AgentMemoryItem[]
   dhan: DhanConfig
   binance: BinanceConfig
+  // MCP (Model Context Protocol) servers — extend the agent's tool surface
+  // dynamically. Each enabled server's tools are auto-discovered and injected
+  // into the system prompt. See src/lib/mcp/* for the client manager.
+  mcpServers: McpServerConfig[]
 }
 
 export interface ChatSession {
@@ -294,4 +306,5 @@ export const DEFAULT_CONFIG: AgentConfig = {
     apiSecret: "",
     testnet: false,
   },
+  mcpServers: buildDefaultMcpServers(),
 }

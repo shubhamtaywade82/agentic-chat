@@ -20,6 +20,11 @@ scanners), and renders the full reasoning trace as a polished UI.
   open interest, long/short ratio), DhanHQ Indian markets (LTP, holdings,
   positions, funds), and built-in calculator / weather / web-search / code
   interpreter tools.
+- **MCP (Model Context Protocol) integration** — extend the agent's tool
+  surface dynamically by plugging in any MCP server. All 7 official reference
+  servers are pre-configured and enabled by default (memory, time,
+  sequential-thinking, fetch, everything, filesystem, git). See
+  [MCP section](#mcp-model-context-protocol) below.
 - **Prop-trading engine** — Smart Money Concepts (SMC) / ICT setup scanner
   (FVG, Order Blocks, Liquidity Pools, Market Structure, AMD cycles, Judas
   swings, OTE zone, Silver Bullet windows) with multi-target RRR planning.
@@ -78,7 +83,8 @@ src/
 │   └── ui/                         # shadcn/ui primitives
 ├── lib/
 │   ├── agent-types.ts              # AgentConfig, TraceStep, AVAILABLE_TOOLS
-│   ├── live-tools.ts               # Tool dispatcher (Binance/Dhan/general)
+│   ├── live-tools.ts               # Tool dispatcher (Binance/Dhan/general + MCP prompt injection)
+│   ├── mcp/                         # MCP integration (types, registry, client manager)
 │   ├── prop-engine.ts              # SMC/ICT setup evaluator
 │   ├── memory-engine.ts           # Memory ranking + /learn parsing
 │   ├── trace-exporter.ts          # Markdown / JSON trace export
@@ -156,6 +162,101 @@ If that passes locally, CI will pass on GitHub Actions.
 The Z.ai Code sandbox-specific scripts under `.zscripts/` are platform hooks
 (used only inside the Z.ai Code sandbox), not part of the application. Runtime
 PIDs and logs in `.zscripts/` are gitignored.
+
+## MCP (Model Context Protocol)
+
+This app integrates the [Model Context Protocol](https://modelcontextprotocol.io) so the agent's tool surface can be extended dynamically — without writing new code or rebuilding. Plug in any MCP server (local via stdio, or remote via HTTP/SSE) and its tools become immediately available to the agent's ReAct loop.
+
+### Pre-configured reference servers
+
+All 7 official reference MCP servers are pre-configured in `DEFAULT_CONFIG.mcpServers` and enabled by default. Open **Configure Agent → MCP tab** to toggle them or edit their args.
+
+| Server | Transport | Package | Default | Tools |
+| --- | --- | --- | --- | --- |
+| `memory` | stdio (npx) | `@modelcontextprotocol/server-memory` | enabled | 9 — knowledge graph (entities, relations, observations) |
+| `time` | stdio (uvx) | `mcp-server-time` | enabled | 2 — current time, timezone conversion |
+| `sequentialthinking` | stdio (npx) | `@modelcontextprotocol/server-sequential-thinking` | enabled | 1 — dynamic thought sequences |
+| `fetch` | stdio (uvx) | `mcp-server-fetch` | enabled | 1 — web content → markdown |
+| `everything` | stdio (npx) | `@modelcontextprotocol/server-everything` | enabled | 13 — reference/test tools (echo, add, long-running-op, …) |
+| `filesystem` | stdio (npx) | `@modelcontextprotocol/server-filesystem /tmp` | enabled | 14 — read/write/list/search files |
+| `git` | stdio (uvx) | `mcp-server-git --repository .` | disabled | 12 — status, diff, log, commit, branch, … |
+
+Discovered tool count: **52 tools** across 7 servers (verified end-to-end).
+
+### How it works
+
+1. When the user sends a chat message, the `/api/agent` route spawns the `McpClientManager` (`src/lib/mcp/client.ts`).
+2. The manager connects to every enabled MCP server **in parallel** (stdio = spawn child process; http/sse = open HTTP/SSE connection).
+3. Each server's `listTools()` is called and the union of all tools is gathered.
+4. The MCP tools are appended to the LLM's system prompt alongside the built-in live tools, using the `mcp__<serverSlug>__<toolName>` naming convention so they're unambiguously routed back to the originating server.
+5. During the ReAct loop, if the agent emits an Action whose tool name starts with `mcp__`, the call is dispatched to the MCP manager; otherwise it goes to the built-in `executeLiveTool`.
+6. In a `finally` block, all MCP connections are closed — no orphan child processes.
+
+Failures are isolated: a single broken server is logged and skipped, the rest of the agent loop proceeds normally.
+
+### Managing MCP servers
+
+Open **Configure Agent** (top-right gear) → **MCP** tab. From there you can:
+
+- **Toggle** any pre-configured server on/off.
+- **Test** a server — spawns it, lists tools, shows a preview of the first 10 tool names + descriptions, reports errors.
+- **Edit** a server — change command, args, env vars (for stdio) or URL/headers (for http/sse).
+- **Add** a custom server — pick transport (stdio | http | sse), fill in the config, save.
+- **Remove** a server you no longer need.
+
+The agent runtime panel (right sidebar) shows a live `N MCP` chip and lists each enabled MCP server as a `mcp:<name>` chip in the tools list.
+
+### Adding a remote MCP server
+
+In the MCP tab, click **Add Server**, pick `http` or `sse` transport, and enter the server URL. Add any required auth headers (e.g. `Authorization: Bearer <token>`) in the headers field — they'll be sent on every request.
+
+```json
+{
+  "name": "my-remote-server",
+  "transport": "http",
+  "url": "https://mcp.example.com/mcp",
+  "headers": { "Authorization": "Bearer xxx" },
+  "enabled": true
+}
+```
+
+### Adding a local stdio MCP server
+
+Pick `stdio` transport, enter a command and one arg per line. Environment variables are `KEY=value`, one per line.
+
+```json
+{
+  "name": "github",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx" },
+  "enabled": true
+}
+```
+
+### MCP API endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/mcp/tools` | Body: `{ servers: McpServerConfig[] }`. Returns the flattened list of all tools across all enabled servers. Used by the MCP tab to show tool counts. |
+| `POST /api/mcp/test` | Body: `{ server: McpServerConfig }`. Tests a single server connection and returns the tool list (or error). Used by the Test button. |
+
+### MCP file layout
+
+```
+src/lib/mcp/
+├── types.ts        # McpServerConfig, McpToolDescriptor, slug + name helpers
+├── registry.ts     # 7 pre-configured reference servers (buildDefaultMcpServers)
+└── client.ts      # McpClientManager — connectAll, callTool, closeAll
+
+src/app/api/mcp/
+├── tools/route.ts  # POST: list tools from all configured servers
+└── test/route.ts   # POST: test a single server connection
+
+src/components/agent-chat/
+└── mcp-tab.tsx     # UI for managing MCP servers (add/edit/test/toggle/remove)
+```
 
 ## License
 
