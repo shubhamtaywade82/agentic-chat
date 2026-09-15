@@ -1,0 +1,12 @@
+{
+  "name": "chart-sdk",
+  "version": "1.0.0",
+  "description": "Local chart-sdk stub: Smart Money Concepts (SMC) & ICT technical analysis detectors. Replaces the previously referenced absolute-path dependency.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": "./src/index.js",
+    "./core": "./src/core.js"
+  },
+  "license": "MIT"
+}

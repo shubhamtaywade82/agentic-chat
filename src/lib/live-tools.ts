@@ -3,9 +3,28 @@ import { evaluatePropSetup, scanPropWatchlist, DEFAULT_PROP_WATCHLIST } from "./
 import * as DhanPkg from "@shubhamtaywade82/dhanhq-ts"
 import * as BinancePkg from "binance-client-ts"
 
-const DhanClient = (DhanPkg as { DhanClient?: typeof DhanPkg.DhanClient; default?: { DhanClient?: typeof DhanPkg.DhanClient } }).DhanClient || (DhanPkg as { default?: { DhanClient?: typeof DhanPkg.DhanClient } }).default?.DhanClient || DhanPkg.DhanClient
-const AgentToolRegistry = (DhanPkg as { AgentToolRegistry?: typeof DhanPkg.AgentToolRegistry; default?: { AgentToolRegistry?: typeof DhanPkg.AgentToolRegistry } }).AgentToolRegistry || (DhanPkg as { default?: { AgentToolRegistry?: typeof DhanPkg.AgentToolRegistry } }).default?.AgentToolRegistry || DhanPkg.AgentToolRegistry
-const BinanceClient = (BinancePkg as { BinanceClient?: typeof BinancePkg.BinanceClient; default?: { BinanceClient?: typeof BinancePkg.BinanceClient } }).BinanceClient || (BinancePkg as { default?: { BinanceClient?: typeof BinancePkg.BinanceClient } }).default?.BinanceClient || BinancePkg.BinanceClient
+// Resolves the named exports across CommonJS / ESM / default interop variants
+// for the DhanHQ and Binance SDK packages. Both packages may export their
+// classes either as a named export (`{ DhanClient }`), a default export
+// (`{ default: { DhanClient } }`), or a default-of-default (`{ default: {
+// default: { DhanClient } } }`).
+function resolveExport<T>(mod: unknown, name: string): T {
+  if (mod && typeof mod === "object") {
+    const m = mod as Record<string, unknown>
+    if (typeof m[name] === "function") return m[name] as T
+    const def = m.default as Record<string, unknown> | undefined
+    if (def && typeof def[name] === "function") return def[name] as T
+    if (def && typeof def.default === "object" && def.default !== null) {
+      const inner = def.default as Record<string, unknown>
+      if (typeof inner[name] === "function") return inner[name] as T
+    }
+  }
+  throw new Error(`Could not resolve export "${name}" from package`)
+}
+
+const DhanClient = resolveExport<typeof DhanPkg.DhanClient>(DhanPkg, "DhanClient")
+const AgentToolRegistry = resolveExport<typeof DhanPkg.AgentToolRegistry>(DhanPkg, "AgentToolRegistry")
+const BinanceClient = resolveExport<typeof BinancePkg.BinanceClient>(BinancePkg, "BinanceClient")
 
 // Resolves DhanClient using Direct or Endpoint Auth
 export async function resolveDhanClient(config?: DhanConfig): Promise<InstanceType<typeof DhanClient>> {

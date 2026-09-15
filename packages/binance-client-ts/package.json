@@ -1,0 +1,8 @@
+{
+  "name": "binance-client-ts",
+  "version": "1.0.0",
+  "description": "Lightweight Binance USD-M futures client (public REST + optional authenticated). Local stub package replacing the previously referenced absolute-path dependency.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "license": "MIT"
+}

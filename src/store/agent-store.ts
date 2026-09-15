@@ -232,7 +232,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   resetConfig: () => {
-    set({ config: { ...DEFAULT_CONFIG, enabledTools: { ...DEFAULT_CONFIG.enabledTools } } })
+    // Deep-copy nested objects so DEFAULT_CONFIG is never mutated by later
+    // updateConfig calls (which would otherwise leak user edits back into the
+    // defaults used by future resetConfig() calls).
+    set({
+      config: {
+        ...DEFAULT_CONFIG,
+        enabledTools: { ...DEFAULT_CONFIG.enabledTools },
+        apiKeys: [...(DEFAULT_CONFIG.apiKeys || [])],
+        customTools: [...(DEFAULT_CONFIG.customTools || [])],
+        memories: (DEFAULT_CONFIG.memories || []).map((m) => ({ ...m })),
+        dhan: { ...DEFAULT_CONFIG.dhan },
+        binance: { ...DEFAULT_CONFIG.binance },
+      },
+    })
     if (typeof window !== "undefined") localStorage.removeItem(CONFIG_KEY)
     get().loadModels(DEFAULT_CONFIG.provider, DEFAULT_CONFIG.apiBaseUrl, DEFAULT_CONFIG.apiKey)
   },
