@@ -13,29 +13,56 @@ interface ChatMessage {
 const KNOWN_PREFIXES = ["binance_", "futures_", "dhan_", "prop_", "mcp_"]
 const KNOWN_EXACT = ["calculator", "weather_api", "weather", "web_search", "search", "code_interpreter"]
 
+const TOOL_ALIASES: Record<string, string> = {
+  propscan: "prop_scan_setups",
+  propscansetups: "prop_scan_setups",
+  scan_setups: "prop_scan_setups",
+  scansetups: "prop_scan_setups",
+  scansetup: "prop_scan_setups",
+  propeval: "prop_evaluate_pair",
+  propevaluatepair: "prop_evaluate_pair",
+  evaluatesetup: "prop_evaluate_pair",
+  eval_pair: "prop_evaluate_pair",
+  proprisk: "prop_risk_calculator",
+  propriskcalculator: "prop_risk_calculator",
+  riskcalc: "prop_risk_calculator",
+  positionsize: "prop_risk_calculator",
+  binance_price: "binance_price",
+  binanceprice: "binance_price",
+  price: "binance_price",
+  binance: "binance_price",
+  ticker: "binance_24hr_ticker",
+  binance_ticker: "binance_24hr_ticker",
+  stats: "binance_24hr_ticker",
+  kline: "binance_klines",
+  klines: "binance_klines",
+  candle: "binance_klines",
+  candles: "binance_klines",
+  orderbook: "binance_order_book",
+  order_book: "binance_order_book",
+  depth: "binance_order_book",
+  funding_rate: "binance_funding_rate",
+  funding: "binance_funding_rate",
+  open_interest: "binance_open_interest",
+  long_short_ratio: "binance_long_short_ratio",
+  weather: "weather_api",
+  weather_api: "weather_api",
+  calc: "calculator",
+  calculator: "calculator",
+  math: "calculator",
+  search: "web_search",
+  web_search: "web_search",
+  code: "code_interpreter",
+  code_interpreter: "code_interpreter",
+}
+
 function normalizeToolName(name: string, customTools: CustomTool[] = []): string | null {
   const norm = name.toLowerCase().replace(/[^a-z0-9_]/g, "")
   if (KNOWN_EXACT.includes(norm)) return norm
   if (KNOWN_PREFIXES.some((p) => norm.startsWith(p))) return norm
   const matchedCustom = customTools.find((c) => c.name.toLowerCase() === norm)
   if (matchedCustom) return matchedCustom.name
-
-  // Prop trading aliases
-  if (norm.includes("propscan") || norm.includes("scan_setup") || norm.includes("scansetup") || norm.includes("setups")) return "prop_scan_setups"
-  if (norm.includes("propeval") || norm.includes("evaluatesetup") || norm.includes("eval_pair")) return "prop_evaluate_pair"
-  if (norm.includes("proprisk") || norm.includes("riskcalc") || norm.includes("positionsize")) return "prop_risk_calculator"
-
-  // Generic aliases mapped to concrete live tools
-  if (norm.includes("price") || norm.includes("rate") || norm === "binance") return "binance_price"
-  if (norm.includes("ticker") || norm.includes("stats")) return "binance_24hr_ticker"
-  if (norm.includes("kline") || norm.includes("candle") || norm.includes("chart")) return "binance_klines"
-  if (norm.includes("orderbook") || norm.includes("depth")) return "binance_order_book"
-  if (norm.includes("weather") || norm.includes("forecast") || norm.includes("temperature")) return "weather_api"
-  if (norm.includes("calc") || norm.includes("math") || norm.includes("eval")) return "calculator"
-  if (norm.includes("search") || norm.includes("web") || norm.includes("google") || norm.includes("wiki")) return "web_search"
-  if (norm.includes("code") || norm.includes("js") || norm.includes("sandbox")) return "code_interpreter"
-
-  return null
+  return TOOL_ALIASES[norm] || null
 }
 
 function inferToolFromContext(text: string, args: Record<string, unknown>, customTools: CustomTool[] = []): string | null {
@@ -60,6 +87,17 @@ function inferToolFromContext(text: string, args: Record<string, unknown>, custo
   if (args.query) return "web_search"
   if (args.code) return "code_interpreter"
   return null
+}
+
+function buildToolArgs(toolName: string, val: string): Record<string, unknown> {
+  if (toolName.includes("binance")) return { symbol: val }
+  if (toolName.includes("dhan_market_summary")) return { underlyingSymbol: val }
+  if (toolName.includes("dhan")) return { securityId: val }
+  if (toolName.includes("weather")) return { location: val }
+  if (toolName.includes("calc")) return { expression: val }
+  if (toolName.includes("search")) return { query: val }
+  if (toolName.includes("code")) return { code: val }
+  return { input: val }
 }
 
 // Prune history to prevent exceeding model context window while retaining system prompt and latest user query
@@ -140,7 +178,7 @@ async function callLlm(
 // Parses tool call action and action input from various LLM response formats
 function parseAction(text: string, customTools: CustomTool[] = []): { toolName: string; args: Record<string, unknown> } | null {
   // 1. JSON object directly in Action line (e.g. Action: {"tool": "binance_price", "symbol": "SOLUSDT"} or Action: {"symbol": "SOLUSDT"})
-  const jsonActionMatch = text.match(/Action:\s*(\{[\s\S]*?\})/i) || text.match(/Action:\s*```(?:json)?\s*(\{[\s\S]*?\})\s*```/i)
+  const jsonActionMatch = text.match(/(?:Action|Tool|Tool Call):\s*(\{[\s\S]*?\})/i) || text.match(/(?:Action|Tool|Tool Call):\s*```(?:json)?\s*(\{[\s\S]*?\})\s*```/i)
   if (jsonActionMatch) {
     try {
       const obj = JSON.parse(jsonActionMatch[1])
@@ -163,7 +201,7 @@ function parseAction(text: string, customTools: CustomTool[] = []): { toolName: 
   }
 
   // 2. Standard or function syntax (e.g. Action: binance_price({"symbol": "SOLUSDT"}) or Action: binance_price)
-  const stdMatch = text.match(/Action:\s*[`\[]?([a-zA-Z0-9_\-]+)[`\]]?(?:[\s\(]+(\{[\s\S]*?\})[\)]?)?/i)
+  const stdMatch = text.match(/(?:Action|Tool|Tool Call):\s*[`\[]?([a-zA-Z0-9_\-]+)[`\]]?(?:[\s\(]+(\{[\s\S]*?\})[\)]?)?/i)
   if (stdMatch) {
     const rawTool = stdMatch[1].trim()
     const normalized = normalizeToolName(rawTool, customTools)
@@ -181,45 +219,29 @@ function parseAction(text: string, customTools: CustomTool[] = []): { toolName: 
           const raw = inputMatch[1].trim()
           try {
             const parsed = JSON.parse(raw)
-            if (typeof parsed === "string") {
-              try {
-                args = JSON.parse(parsed)
-              } catch {
-                args = { input: parsed }
-              }
-            } else if (typeof parsed === "object" && parsed !== null) {
-              args = parsed
-            } else {
-              args = { input: parsed }
-            }
+            args = typeof parsed === "object" && parsed !== null ? parsed : { input: parsed }
           } catch {
             args = { input: raw.replace(/^["'`]|["'`]$/g, "") }
           }
         }
       }
-      return { toolName: normalized, args: typeof args === "object" && args !== null ? args : { input: args } }
+      return { toolName: normalized, args }
     }
   }
 
-  // 3. Natural language tool intent fallback (e.g. "I will fetch using binance_price with symbol 'SOLUSDT'")
-  const natMatch = text.match(/(?:using|calling|call|use|fetch|fetching|get|getting|retrieve|retrieving)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)(?:[\s\S]*?(?:symbol|ticker|underlyingSymbol|query|location|code|securityId|expression)["\s:=]+([a-zA-Z0-9_\.\-]+))?/i)
+  // Do not perform fuzzy natural language matching on finished answers or structured tables
+  if (/Final Answer:/i.test(text) || text.includes("|") || text.length > 400) {
+    return null
+  }
+
+  // 3. Fallback for explicit tool execution intents in thoughts with arguments
+  const natMatch = text.match(/\b(?:call|calling|fetch|fetching|run|execute)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)(?:[\s\S]*?(?:symbol|ticker|underlyingSymbol|query|location|code|securityId|expression)["\s:=]+([a-zA-Z0-9_\.\-]+))?/i)
   if (natMatch) {
     const rawTool = natMatch[1].toLowerCase().replace(/[^a-z0-9_]/g, "")
     const normalized = normalizeToolName(rawTool, customTools)
-    if (normalized) {
-      const val = natMatch[2]?.replace(/^["'`]|["'`]$/g, "")
-      let args: Record<string, unknown> = {}
-      if (val) {
-        if (normalized.includes("binance")) args = { symbol: val }
-        else if (normalized.includes("dhan_market_summary")) args = { underlyingSymbol: val }
-        else if (normalized.includes("dhan")) args = { securityId: val }
-        else if (normalized.includes("weather")) args = { location: val }
-        else if (normalized.includes("calc")) args = { expression: val }
-        else if (normalized.includes("search")) args = { query: val }
-        else if (normalized.includes("code")) args = { code: val }
-        else args = { input: val }
-      }
-      return { toolName: normalized, args }
+    const val = natMatch[2]?.replace(/^["'`]|["'`]$/g, "")
+    if (normalized && val) {
+      return { toolName: normalized, args: buildToolArgs(normalized, val) }
     }
   }
 
@@ -385,9 +407,12 @@ export async function POST(req: NextRequest) {
             currentIteration += 1
           } else {
             const finalAnswer = extractFinalAnswer(content)
+            const hasSubstantialAnswer =
+              finalAnswer.length > 80 || /\n(?:```|[#*-]|<table|\|)/.test(finalAnswer)
             const isOnlyPlanOrThought =
               !finalAnswer ||
-              ((content.trim().startsWith("Plan:") || content.trim().startsWith("Thought:")) &&
+              (!hasSubstantialAnswer &&
+                (content.trim().startsWith("Plan:") || content.trim().startsWith("Thought:")) &&
                 !/Final Answer:/i.test(content))
             // Only consider an answer premature if the plan explicitly intended to fetch external tool data
             const answerPrematureVsPlan = planRequiresTool && !toolCallMade
