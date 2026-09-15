@@ -1,0 +1,122 @@
+name: Deploy
+
+# Builds the standalone Next.js server on every push to main and uploads it
+# as a workflow artifact. The actual deploy step is intentionally left as a
+# placeholder — fill it in once you know your target (VPS, Docker registry,
+# Cloud Run, Fly.io, Vercel, etc.).
+#
+# The build is gated on the CI workflow passing first, so we never deploy a
+# broken main.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (defaults to main)"
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Wait for CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check CI status on the pushed commit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ref = context.payload.inputs?.ref || context.ref;
+            const sha = context.payload.inputs?.ref
+              ? (await github.rest.repos.getCommit({ owner, repo, ref: `heads/${ref.replace('refs/heads/', '')}` })).data.sha
+              : context.sha;
+
+            // Poll the CI workflow runs for this commit (max 10 min)
+            for (let attempt = 0; attempt < 60; attempt++) {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner, repo,
+                workflow_id: "ci.yml",
+                head_sha: sha,
+                status: "completed",
+              });
+              const latest = runs.data.workflow_runs[0];
+              if (latest) {
+                if (latest.conclusion === "success") {
+                  core.info(`CI passed on ${sha.slice(0, 7)}`);
+                  return;
+                }
+                core.setFailed(`CI failed or cancelled on ${sha.slice(0, 7)} (conclusion: ${latest.conclusion})`);
+                return;
+              }
+              core.info(`Waiting for CI to finish on ${sha.slice(0, 7)}... (${attempt + 1}/60)`);
+              await new Promise((r) => setTimeout(r, 10000));
+            }
+            core.setFailed(`Timed out waiting for CI on ${sha.slice(0, 7)}`);
+
+  build:
+    name: Build standalone artifact
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Tar the standalone artifact
+        run: |
+          mkdir -p deploy
+          tar -C .next -czf deploy/standalone.tgz standalone static
+          tar -czf deploy/public.tgz public
+          ls -lh deploy/
+
+      - name: Upload deploy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-${{ github.sha }}
+          path: deploy/
+          retention-days: 30
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy (placeholder)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      # Uncomment to require manual approval before each deploy lands:
+      # url: https://your-app.example.com
+    steps:
+      - name: TODO — wire up your deploy target
+        run: |
+          echo "::notice::No deploy target configured yet."
+          echo "::notice::Edit .github/workflows/deploy.yml and replace this step with:"
+          echo "::notice::  - SCP/rsync deploy/standalone.tgz to your VPS"
+          echo "::notice::  - docker build/push to your registry"
+          echo "::notice::  - gcloud run deploy / fly deploy / vercel --prod"
+          echo "::notice::The built artifact is available as workflow artifact 'deploy-${{ github.sha }}'."
+          exit 0

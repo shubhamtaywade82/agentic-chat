@@ -1,5 +1,8 @@
 # Agentic Chat — ReAct Agent Playground
 
+[![CI](https://github.com/shubhamtaywade82/agentic-chat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shubhamtaywade82/agentic-chat/actions/workflows/ci.yml)
+[![Deploy](https://github.com/shubhamtaywade82/agentic-chat/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/shubhamtaywade82/agentic-chat/actions/workflows/deploy.yml)
+
 An interactive Next.js 16 + TypeScript app that visualizes the agentic
 **ReAct (Reason + Act + Observe)** loop in real time. It connects directly to
 real LLM providers (Ollama, OpenAI, Anthropic, Gemini, Groq), executes live
@@ -113,8 +116,46 @@ packages/
 | `npm run build` | Production build (standalone output) |
 | `npm run start` | Run the production standalone server |
 | `npm run lint` | ESLint (next/core-web-vitals + typescript) |
+| `npm run typecheck` | TypeScript typecheck (`tsc --noEmit`) |
+| `npm run ci` | Lint + typecheck + build in one shot (mirrors CI) |
 | `npm run db:push` | Apply Prisma schema to the SQLite DB |
 | `npm run db:generate` | Regenerate the Prisma client |
+
+## CI/CD
+
+The repo ships with two GitHub Actions workflows:
+
+### `ci.yml` — quality gate (runs on every PR and push to `main` / `develop`)
+
+1. Checkout + setup Node 20 LTS (with `npm` cache)
+2. `npm ci` — install dependencies from lockfile
+3. `npm run lint` — ESLint
+4. `npm run typecheck` — `tsc --noEmit`
+5. `npm run build` — `next build` with standalone output
+6. Smoke-test the built server — boots `node .next/standalone/server.js`, polls `/api` until it returns `{status:"ok"}`, then kills it. Catches runtime import errors that `tsc` can't see.
+7. Upload the standalone build as a workflow artifact (only on `main`, 7-day retention)
+
+Superseded runs on the same branch are cancelled (`concurrency: cancel-in-progress`).
+
+### `deploy.yml` — deploy gate (runs on push to `main`)
+
+1. **Wait for CI** — polls the `ci.yml` runs for the pushed commit. Fails fast if CI didn't pass or timed out (10 min).
+2. **Build standalone artifact** — rebuilds the standalone output and tars it (with `public/`) into a `deploy/` folder, uploaded as artifact `deploy-<sha>` (30-day retention).
+3. **Deploy (placeholder)** — intentional no-op step that prints instructions for wiring up your real deploy target (VPS via SCP/rsync, Docker registry, Cloud Run, Fly.io, Vercel, etc.). Edit this step once you know your target.
+
+### Running CI locally
+
+```bash
+npm run ci    # lint + typecheck + build, same as CI
+```
+
+If that passes locally, CI will pass on GitHub Actions.
+
+### Local-only files
+
+The Z.ai Code sandbox-specific scripts under `.zscripts/` are platform hooks
+(used only inside the Z.ai Code sandbox), not part of the application. Runtime
+PIDs and logs in `.zscripts/` are gitignored.
 
 ## License
 

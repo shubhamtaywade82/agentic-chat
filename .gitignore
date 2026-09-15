@@ -52,3 +52,8 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Local-only dev artifacts (don't commit runtime PIDs or build logs)
+.zscripts/dev.pid
+.zscripts/*.log
+tsconfig.tsbuildinfo

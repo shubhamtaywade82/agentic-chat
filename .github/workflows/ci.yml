@@ -1,0 +1,97 @@
+name: CI
+
+# Runs on every push to main/develop and on every PR targeting main.
+# Caches npm deps, then runs lint → typecheck → build. Fails fast.
+# On main, also uploads the standalone build as an artifact for downstream
+# deploy workflows to consume.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress runs of the same workflow on the same ref when a new
+# commit is pushed. Saves CI minutes and avoids stale deployments.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint · Typecheck · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Disable Next.js telemetry during CI (cleaner logs, no PII sent).
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Node 20 LTS — matches Next.js 16's minimum supported runtime
+          # (Node 18.18+). Bump to 22 when you're ready to drop 18 support.
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        # `npm ci` requires a committed package-lock.json (which we have).
+        # It's faster and more reproducible than `npm install`.
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Build (next build, standalone)
+        run: npm run build
+
+      - name: Smoke-test the built server
+        # Boot the standalone server in the background, hit /api, then kill.
+        # This catches runtime import errors that tsc can't see (e.g. a
+        # dynamic require of a missing module).
+        run: |
+          node .next/standalone/server.js &
+          SERVER_PID=$!
+          # Wait for the server to accept connections (max 20s)
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:3000/api >/dev/null 2>&1; then
+              echo "Server responded OK after ${i}s"
+              break
+            fi
+            sleep 1
+            if [ "$i" -eq 20 ]; then
+              echo "Server did not respond within 20s"
+              kill $SERVER_PID 2>/dev/null || true
+              exit 1
+            fi
+          done
+          # Verify the health-check payload
+          curl -sS http://localhost:3000/api | jq -e '.status == "ok"' > /dev/null
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+
+      - name: Upload standalone build
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-build
+          path: |
+            .next/standalone
+            .next/static
+            public
+          retention-days: 7
+          if-no-files-found: error
