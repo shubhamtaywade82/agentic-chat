@@ -110,10 +110,10 @@ function buildHtfBias(candles: CandleData[], label: string): HtfBias {
 
 // Calculates long setup targets and invalidation
 function buildLongPlan(price: number, demandOb: any, sweep: any, targetBsl: any) {
-  const stop = demandOb ? demandOb.bottom * 0.998 : price * 0.985
-  const risk = Math.max(0.0001, price - stop)
+  const stop = demandOb && demandOb.bottom < price ? demandOb.bottom * 0.998 : price * 0.985
+  const risk = Math.max(price * 0.005, price - stop)
   const tp1 = price + risk * 1.5
-  const tp2 = targetBsl ? targetBsl.level : price + risk * 2.8
+  const tp2 = targetBsl && targetBsl.level > price + risk * 1.8 ? targetBsl.level : price + risk * 2.8
   const tp3 = price + risk * 4.5
   const rrr = Number(((tp2 - price) / risk).toFixed(2))
 
@@ -141,10 +141,10 @@ function buildLongPlan(price: number, demandOb: any, sweep: any, targetBsl: any)
 
 // Calculates short setup targets and invalidation
 function buildShortPlan(price: number, supplyOb: any, sweep: any, targetSsl: any) {
-  const stop = supplyOb ? supplyOb.top * 1.002 : price * 1.015
-  const risk = Math.max(0.0001, stop - price)
+  const stop = supplyOb && supplyOb.top > price ? supplyOb.top * 1.002 : price * 1.015
+  const risk = Math.max(price * 0.005, stop - price)
   const tp1 = price - risk * 1.5
-  const tp2 = targetSsl ? targetSsl.level : price - risk * 2.8
+  const tp2 = targetSsl && targetSsl.level < price - risk * 1.8 ? targetSsl.level : price - risk * 2.8
   const tp3 = price - risk * 4.5
   const rrr = Number(((price - tp2) / risk).toFixed(2))
 

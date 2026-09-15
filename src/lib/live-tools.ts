@@ -115,6 +115,11 @@ export function getToolSystemPrompt(enabledTools: Record<string, boolean>, custo
   return `AVAILABLE TOOLS:
 ${tools.join("\n")}
 
+TOOL DOMAIN ROUTING (CRITICAL):
+- CRYPTO ASSETS (e.g. SOLUSDT, BTCUSDT, ETHUSDT, XRPUSDT, BNBUSDT): ONLY use binance_* and prop_* tools. NEVER call dhan_* tools for crypto.
+- INDIAN EQUITIES / F&O (e.g. NIFTY, BANKNIFTY, RELIANCE, TCS): ONLY use dhan_* tools.
+- CONVERGENCE: Once a trade setup or technical scan observation is received, output Final Answer immediately. Do not call unrelated tools or check account balances unless specifically requested by the user.
+
 REACT INSTRUCTIONS:
 Always think step-by-step using this exact format:
 Plan:
@@ -131,10 +136,10 @@ Final Answer: [Your complete response formatted in rich GitHub-flavored Markdown
 
 EXAMPLE:
 Plan:
-- Step 1: Fetch live price
-Thought: I will fetch the live price using binance_price.
-Action: binance_price
-Action Input: {"symbol": "SOLUSDT"}`
+- Step 1: Fetch trade setup for SOLUSDT
+Thought: I will use prop_evaluate_pair to scan for live SOLUSDT setups.
+Action: prop_evaluate_pair
+Action Input: {"symbol": "SOLUSDT", "mode": "intraday"}`
 }
 
 // Math calculation helper
