@@ -185,3 +185,21 @@ Stage Summary:
 - Custom MCP servers (local stdio or remote HTTP/SSE) can be added/edited/toggled/removed from the new MCP tab in the Agent Configuration dialog.
 - Failures are isolated: a single broken server doesn't break the agent loop.
 - All work recorded in /home/z/my-project/worklog.md under Task ID 5.
+
+---
+Task ID: openui-spike-push
+Agent: main (Super Z)
+Task: Re-apply the OpenUI integration spike (previous workspace was reset) and push the feature branch to origin.
+
+Work Log:
+- Re-cloned shubhamtaywade82/agentic-chat to /home/z/my-project/repos/agentic-chat.
+- Re-created branch feature/openui-integration from main (19adb3b).
+- Re-applied Pattern A edits: src/lib/agent-types.ts (added openui_gateway to LlmProvider + DEFAULT_PROVIDER_URLS + a default ModelOption); src/app/api/models/route.ts (extended OpenAI-compatible branch to handle openui_gateway).
+- Re-applied Pattern B + D sketches: src/lib/openui/{detect,library,prompt,tool-provider}.ts and src/components/agent-chat/openui-answer.tsx.
+- Re-applied docs/openui-integration.md (full design doc: 4 patterns, rollout plan, code samples, risks).
+- Verified typecheck + lint clean (only pre-existing Prisma client error remains, unrelated to this spike).
+- Pushed feature/openui-integration to origin using the uploaded GitHub token.
+
+Stage Summary:
+- Branch: feature/openui-integration (pushed to origin).
+- Spike complete and ready for PR review.

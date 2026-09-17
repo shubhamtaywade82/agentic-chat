@@ -140,7 +140,21 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   { name: "dhan_market_summary", description: "Summarize technicals, PCR, OI walls, max pain for a symbol", icon: "file-spreadsheet", category: "indian_markets" },
 ]
 
-export type LlmProvider = "ollama_local" | "ollama_cloud" | "openai" | "anthropic" | "gemini" | "groq" | "custom"
+// OpenUI integration (Pattern A): the OpenUI Gateway
+// (https://api.thesys.dev/v1/embed) is an OpenAI-compatible inference
+// endpoint that auto-validates OpenUI Lang output mid-stream. Because
+// `callLlm` in src/app/api/agent/route.ts already speaks OpenAI Chat
+// Completions, no routing changes are needed — we just register the
+// provider and its base URL here. See docs/openui-integration.md §3.A.
+export type LlmProvider =
+  | "ollama_local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "groq"
+  | "custom"
+  | "openui_gateway"
 
 export const DEFAULT_PROVIDER_URLS: Record<LlmProvider, string> = {
   ollama_local: "http://localhost:11434",
@@ -150,6 +164,7 @@ export const DEFAULT_PROVIDER_URLS: Record<LlmProvider, string> = {
   gemini: "https://generativelanguage.googleapis.com",
   groq: "https://api.groq.com/openai/v1",
   custom: "",
+  openui_gateway: "https://api.thesys.dev/v1/embed",
 }
 
 export interface ProviderApiKey {
@@ -176,6 +191,10 @@ export const AVAILABLE_MODELS: ModelOption[] = [
   { id: "claude-3-5-sonnet", label: "Claude 3.5 Sonnet (Anthropic)", contextWindow: 200_000, costPer1k: 3, provider: "anthropic" },
   { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash (Google)", contextWindow: 1_000_000, costPer1k: 0.1, provider: "gemini" },
   { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Groq)", contextWindow: 128_000, costPer1k: 0.5, provider: "groq" },
+  // OpenUI Gateway default. The Gateway routes to many underlying providers
+  // (openai/*, anthropic/*, etc.); this entry just gives the config dialog
+  // something to show before the user fetches the live model list.
+  { id: "openai/gpt-5", label: "GPT-5 via OpenUI Gateway", contextWindow: 128_000, costPer1k: 5, provider: "openui_gateway" },
 ]
 
 export type DhanAuthMode = "direct" | "endpoint"
