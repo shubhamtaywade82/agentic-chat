@@ -203,3 +203,30 @@ Work Log:
 Stage Summary:
 - Branch: feature/openui-integration (pushed to origin).
 - Spike complete and ready for PR review.
+
+---
+Task ID: openui-pattern-b
+Agent: main (Super Z)
+Task: Wire OpenUI generative-UI rendering (Pattern B) end-to-end on the same feature branch — install @openuidev/* packages, mount <Renderer> in the answer step, add an "Enable OpenUI" toggle to the config dialog, augment the system prompt (cloud:false — works with ANY provider, no THESYS_API_KEY required). User wants "all the UI related things from openui in our agentic-chat".
+
+Work Log:
+- Installed @openuidev/react-lang + @openuidev/lang-core (skipped react-ui — peer-dep conflict with our zustand@5; we don't need the full <AgentInterface> chat surface, only the <Renderer>).
+- Activated src/lib/openui/library.tsx (renamed from .ts to support JSX): 10 domain components — Stack (root), Text, BinancePriceCard, OrderBookTable, TradeSetupCard, FundingRateCard, RiskCalculatorCard, StatBlock, ActionButton, MarkdownFallback. Each uses Zod v4 schemas for prop validation.
+- Created src/lib/openui/spec.ts — server-safe stub-only library (no React) using createLibrary/defineComponent from @openuidev/lang-core. Same component names/descriptions/props as library.tsx but with `component: null`. This is what prompt.ts imports for system-prompt generation on the server side.
+- Split rationale: prompt.ts is imported by /api/agent (server route). If it imported library.tsx, react-syntax-highlighter (pulled in transitively) would break SSR with "dl.createContext is not a function". The spec-only stubs produce the same JSON schema + prompt spec without any React code.
+- Activated src/lib/openui/prompt.ts: calls generateSystemPrompt({cloud:false, library:{schema, components, root, ...}}). cloud:false = self-hosted, works with ANY provider (Ollama, OpenAI, Groq, …) — no THESYS_API_KEY required.
+- Activated src/components/agent-chat/openui-answer.tsx: mounts <Renderer> from @openuidev/react-lang with the domain library + toolProvider.
+- Refactored src/lib/openui/tool-provider.ts: instead of importing executeLiveTool directly (which would drag @shubhamtaywade82/dhanhq-ts — a Node-only module needing 'readline' — into the client bundle), each tool function POSTs to a new /api/tool server route. This keeps server credentials and Node-only modules server-side.
+- Created src/app/api/tool/route.ts: server-side tool execution endpoint. Accepts {tool, args, config}, routes mcp__-prefixed names to the pooled McpClientManager, others to executeLiveTool. Returns {ok, data} or {ok:false, error}.
+- Added openuiEnabled:boolean to AgentConfig type + DEFAULT_CONFIG (defaults false — opt-in).
+- Added backfill in src/store/agent-store.ts hydrateFromStorage so old localStorage configs without openuiEnabled default to false.
+- Wired src/components/agent-chat/trace-step.tsx: added new AnswerBody component that branches on (openuiEnabled && looksLikeOpenUILang(content)) to mount <OpenUIAnswerRenderer> vs the existing <Markdown>. Falls back to Markdown automatically if the model emits plain text — UI never breaks.
+- Added new "OpenUI" tab (7th tab) to src/components/agent-chat/agent-config-dialog.tsx with: a switch to toggle openuiEnabled, a note about model-size recommendations, and a grid showing all 10 available components.
+- Wired src/app/api/agent/route.ts: when config.openuiEnabled is true, swap the system prompt builder to buildOpenUISystemPrompt (which injects the OpenUI component spec + rules). Otherwise, the existing prompt is unchanged.
+- Verified: tsc --noEmit clean (0 errors); eslint . clean (0 errors, 0 warnings); next build succeeds — all 16 routes build including the new /api/tool route.
+
+Stage Summary:
+- Branch: feature/openui-integration (will be force-updated on push).
+- Pattern B is now LIVE end-to-end. To try it: open Configure Agent → OpenUI tab → toggle "Enable OpenUI Generative-UI Rendering" ON → ask the agent something like "show me the price of BTC and the order book" → response renders as interactive BinancePriceCard + OrderBookTable components instead of a Markdown table.
+- Works with any provider (Ollama local, OpenAI, Groq, Anthropic, Gemini, custom). No THESYS_API_KEY required.
+- Markdown fallback is automatic — if the model doesn't emit valid OpenUI Lang, the existing Markdown renderer kicks in. UI never breaks.

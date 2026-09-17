@@ -5,19 +5,18 @@
  *   - a `Record<string, (args) => Promise<unknown>>` function map, OR
  *   - any `McpClientLike` (duck-typed: has `callTool(name, args)`).
  *
- * We use the function-map form so we can route built-in tools (Binance,
- * Dhan, calculator, …) via `executeLiveTool` and MCP tools via the pooled
- * `McpClientManager` from the same surface. Generated components can then
- * call tools at runtime via OpenUI Lang's `Query()` / `Mutation()`:
+ * We use the function-map form. Each entry POSTs to `/api/tool` (server-side
+ * route at `src/app/api/tool/route.ts`) which calls `executeLiveTool` or the
+ * pooled `McpClientManager`. This keeps server-only credentials (Dhan tokens,
+ * Binance API keys) and Node-only modules (`@shubhamtaywade82/dhanhq-ts`
+ * needs `readline`) off the client bundle.
+ *
+ * Generated components can then call tools at runtime via OpenUI Lang's
+ * `Query()` / `Mutation()`:
  *
  *     Button(onClick: @Run binance_price { symbol: "BTCUSDT" })
  *
  * See docs/openui-integration.md §5.4 (Pattern D).
- *
- * This file is a SKETCH — it type-checks against existing modules today
- * but is not yet wired into `<Renderer>`. To activate, pass the result of
- * `buildToolProvider(...)` as the `toolProvider` prop in
- * `src/components/agent-chat/openui-answer.tsx`.
  */
 
 import type {
@@ -26,9 +25,6 @@ import type {
   DhanConfig,
   McpServerConfig,
 } from "@/lib/agent-types"
-import { executeLiveTool } from "@/lib/live-tools"
-import { acquireConnection } from "@/lib/mcp/pool"
-import { isMcpToolName } from "@/lib/mcp/types"
 
 /**
  * Names of built-in tools we expose to OpenUI-rendered components. Keep
@@ -75,13 +71,48 @@ export type OpenUIToolProvider = Record<
 >
 
 /**
+ * Single client-side function that POSTs a tool invocation to /api/tool.
+ * The server route handles `executeLiveTool` (built-in + custom) and MCP
+ * routing via the pooled `McpClientManager`.
+ */
+async function callToolServerSide(
+  tool: string,
+  args: Record<string, unknown>,
+  config: BuildToolProviderOpts
+): Promise<unknown> {
+  const res = await fetch("/api/tool", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tool,
+      args,
+      config: {
+        customTools: config.customTools,
+        dhan: config.dhan,
+        binance: config.binance,
+        mcpServers: config.mcpServerConfig,
+      },
+    }),
+  })
+  const json = (await res.json()) as { ok: boolean; data?: unknown; error?: string }
+  if (!json.ok) {
+    throw new Error(json.error || `Tool ${tool} failed`)
+  }
+  return json.data
+}
+
+/**
  * Builds the function-map tool provider for OpenUI's `<Renderer>`.
  *
  * Built-in tools are registered by their canonical name (e.g.
- * `binance_price`). MCP tools are routed through a lazy `__mcp` shim that
- * acquires a pooled `McpClientManager` on first call — the pool keeps the
- * connection alive for 10 min idle, so repeated calls during a session
- * are sub-millisecond after the first.
+ * `binance_price`). Custom tools are registered by their user-defined name.
+ * MCP tools (`mcp__<server>__<tool>`) are routed through a single `__mcp`
+ * shim that the renderer can invoke via `Query("__mcp", { tool, args })` —
+ * but LLM-generated components typically call MCP tools directly by their
+ * full name, which we also register.
+ *
+ * Each call POSTs to `/api/tool`; the server route handles execution in
+ * the Node.js runtime (where `dhanhq-ts` and MCP stdio servers work).
  */
 export function buildToolProvider(
   opts: BuildToolProviderOpts
@@ -90,68 +121,26 @@ export function buildToolProvider(
 
   // Built-in live tools.
   for (const name of BUILTIN_TOOL_NAMES) {
-    provider[name] = async (args) => {
-      const r = await executeLiveTool(
-        name,
-        args,
-        opts.customTools,
-        opts.dhan,
-        opts.binance
-      )
-      return r.data
-    }
+    provider[name] = (args) => callToolServerSide(name, args, opts)
   }
 
   // Custom tools (user-defined JS / fetch / static JSON tools).
   for (const ct of opts.customTools) {
     if (!ct.enabled) continue
-    provider[ct.name] = async (args) => {
-      const r = await executeLiveTool(
-        ct.name,
-        args,
-        opts.customTools,
-        opts.dhan,
-        opts.binance
-      )
-      return r.data
-    }
-  }
-
-  // MCP tools — lazy. We don't acquire the pooled connection until a
-  // component actually invokes an MCP tool, because the spawn cost is
-  // ~500ms–2s per server and we don't want to pay it for every render.
-  let mcpConnPromise: ReturnType<typeof acquireConnection> | null = null
-  const getMcp = () => {
-    if (!mcpConnPromise) {
-      mcpConnPromise = acquireConnection(opts.mcpServerConfig)
-    }
-    return mcpConnPromise
+    provider[ct.name] = (args) => callToolServerSide(ct.name, args, opts)
   }
 
   /**
-   * Shim for MCP tool calls. OpenUI Lang's `@Run` action invokes this with
-   * `{ tool: "mcp__memory__create_entities", args: {...} }` and we route it
-   * to the pooled manager.
-   *
-   * The signature is widened to `Record<string, unknown>` to match the rest
-   * of the function map; the `tool` and `args` fields are read off at runtime.
-   *
-   * NOTE: this assumes the component author writes the full MCP tool name
-   * (`mcp__<server>__<tool>`). For LLM-generated components, we should
-   * also register every discovered MCP tool name as a top-level key so
-   * `Query("mcp__memory__create_entities", {...})` works directly. That
-   * discovery happens inside `agent/route.ts` and is out of scope for
-   * this sketch.
+   * Catch-all MCP shim. OpenUI Lang's `@Run` action invokes tools by name;
+   * if the renderer encounters a tool name we didn't pre-register (e.g. a
+   * dynamically-discovered MCP tool), it falls through to this shim with
+   * `{ tool, args }` payload. The server route detects MCP-prefixed names
+   * and routes through the pooled McpClientManager.
    */
   provider.__mcp = async (args: Record<string, unknown>) => {
     const toolName = String(args.tool ?? "")
     const toolArgs = (args.args as Record<string, unknown>) ?? {}
-    if (!isMcpToolName(toolName)) {
-      throw new Error(`Not an MCP tool name: ${toolName}`)
-    }
-    const conn = await getMcp()
-    const r = await conn.manager.callTool(toolName, toolArgs)
-    return r.data
+    return callToolServerSide(toolName, toolArgs, opts)
   }
 
   return provider

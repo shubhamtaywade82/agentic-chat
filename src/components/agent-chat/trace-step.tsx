@@ -16,6 +16,9 @@ import {
 } from "lucide-react"
 import type { TraceStep } from "@/lib/agent-types"
 import { Markdown } from "./markdown"
+import { OpenUIAnswerRenderer } from "./openui-answer"
+import { looksLikeOpenUILang } from "@/lib/openui/detect"
+import { useAgentStore } from "@/store/agent-store"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import {
@@ -194,15 +197,48 @@ function StepBody({
     case "observation":
       return <ObservationBody step={step} meta={KIND_META.observation} />
     case "answer":
-      return (
-        <div className={cn("rounded-xl border p-4 shadow-sm", meta.border, meta.bg)}>
-          <Markdown content={step.content} />
-          {step.status === "running" && (
-            <span className="blink-cursor ml-0.5 inline-block h-4 w-1.5 -mb-0.5 bg-foreground align-middle" />
-          )}
-        </div>
-      )
+      return <AnswerBody step={step} meta={meta} />
   }
+}
+
+/**
+ * Answer body — branches between OpenUI <Renderer> and Markdown based on
+ * (a) whether OpenUI rendering is enabled in the config, and
+ * (b) whether the content actually looks like OpenUI Lang.
+ *
+ * When OpenUI is enabled but the content is plain Markdown (e.g. the model
+ * didn't follow the spec, or the user is using a small local model), we
+ * fall back to Markdown rendering automatically — no broken UI.
+ */
+function AnswerBody({
+  step,
+  meta,
+}: {
+  step: Extract<TraceStep, { kind: "answer" }>
+  meta: (typeof KIND_META)[keyof typeof KIND_META]
+}) {
+  const openuiEnabled = useAgentStore((s) => s.config.openuiEnabled === true)
+  const mcpServers = useAgentStore((s) => s.config.mcpServers)
+  const content = step.content ?? ""
+  const useOpenUI = openuiEnabled && looksLikeOpenUILang(content)
+  const running = step.status === "running"
+
+  return (
+    <div className={cn("rounded-xl border p-4 shadow-sm", meta.border, meta.bg)}>
+      {useOpenUI ? (
+        <OpenUIAnswerRenderer
+          content={content}
+          isStreaming={running}
+          mcpServerConfig={mcpServers}
+        />
+      ) : (
+        <Markdown content={content} />
+      )}
+      {running && !useOpenUI && (
+        <span className="blink-cursor ml-0.5 inline-block h-4 w-1.5 -mb-0.5 bg-foreground align-middle" />
+      )}
+    </div>
+  )
 }
 
 function PlanBody({

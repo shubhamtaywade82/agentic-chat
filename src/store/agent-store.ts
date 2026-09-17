@@ -134,6 +134,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       parsed.enabledTools = parsed.enabledTools || { ...DEFAULT_CONFIG.enabledTools }
       parsed.dhan = { ...DEFAULT_CONFIG.dhan, ...(parsed.dhan || {}) }
       parsed.binance = { ...DEFAULT_CONFIG.binance, ...(parsed.binance || {}) }
+      // Backfill openuiEnabled for configs saved before OpenUI integration
+      // landed. Defaults to false (off) so existing users see no behavior
+      // change until they explicitly opt in via the OpenUI tab.
+      if (typeof parsed.openuiEnabled !== "boolean") {
+        parsed.openuiEnabled = false
+      }
 
       const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
       const activeId = parsedSessions[0]?.id || initialSessionId

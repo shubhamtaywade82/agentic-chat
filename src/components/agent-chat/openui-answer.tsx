@@ -9,17 +9,19 @@
  * parses the streaming content into a tree of domain components (charts,
  * cards, tables) and renders them live as tokens arrive.
  *
- * This file is a SKETCH — uncomment after `npm install @openuidev/react-lang`.
- * The activation wiring lives in `src/components/agent-chat/agent-message.tsx`
- * (branch the answer-step render on `looksLikeOpenUILang(content)`).
+ * The tool provider bridges to:
+ *   - `executeLiveTool` for built-in tools (binance_*, dhan_*, calculator, …)
+ *   - `McpClientManager` (pooled) for MCP tools (`mcp__*`)
+ *
+ * Both are reused from the existing ReAct loop, so a generated button can
+ * invoke the same tools the agent already uses — no duplicate code paths.
  */
 
+import { Renderer } from "@openuidev/react-lang"
 import type { McpServerConfig } from "@/lib/agent-types"
 import { useAgentStore } from "@/store/agent-store"
 import { buildToolProvider } from "@/lib/openui/tool-provider"
 import { domainLibrary } from "@/lib/openui/library"
-
-// import { Renderer, type OpenUIError } from "@openuidev/react-lang"
 
 export interface OpenUIAnswerRendererProps {
   /** The streaming or final answer text (OpenUI Lang). */
@@ -30,16 +32,6 @@ export interface OpenUIAnswerRendererProps {
   mcpServerConfig: McpServerConfig[]
 }
 
-/**
- * Wraps OpenUI's `<Renderer>` with our domain library and tool provider.
- *
- * The tool provider bridges to:
- *   - `executeLiveTool` for built-in tools (binance_*, dhan_*, calculator, …)
- *   - `McpClientManager` (pooled) for MCP tools (`mcp__*`)
- *
- * Both are reused from the existing ReAct loop, so a generated button can
- * invoke the same tools the agent already uses — no duplicate code paths.
- */
 export function OpenUIAnswerRenderer({
   content,
   isStreaming,
@@ -54,14 +46,16 @@ export function OpenUIAnswerRenderer({
     mcpServerConfig,
   })
 
-  const handleError = (_errors: unknown) => {
-    // OpenUI surfaces parse errors here. We log them; the renderer itself
-    // renders a `MarkdownFallback` card for unknown roots, so the user
-    // still sees *something*.
-    // console.warn("[openui]", errors)
+  const handleError = (errors: unknown) => {
+    // OpenUI surfaces parse errors here. The renderer itself renders a
+    // `MarkdownFallback` card for unknown roots, so the user still sees
+    // *something*. We log at debug level only — partial parses are normal
+    // during streaming.
+    if (typeof console !== "undefined") {
+      console.debug("[openui] parse errors", errors)
+    }
   }
 
-  /*
   return (
     <Renderer
       response={content}
@@ -70,21 +64,6 @@ export function OpenUIAnswerRenderer({
       toolProvider={toolProvider}
       onError={handleError}
     />
-  )
-  */
-
-  // Until `@openuidev/react-lang` is installed, render the raw text in a
-  // <pre> so it's at least visible during the spike.
-  return (
-    <pre
-      className="whitespace-pre-wrap rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5 p-3 font-mono text-xs"
-      data-openui-spike
-    >
-      <div className="mb-2 text-[10px] uppercase tracking-wider text-amber-600 dark:text-amber-400">
-        OpenUI Lang (spike — renderer not yet wired)
-      </div>
-      {content}
-    </pre>
   )
 }
 

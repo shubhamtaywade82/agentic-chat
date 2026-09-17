@@ -4,6 +4,7 @@ import { formatMemoriesForPrompt } from "@/lib/memory-engine"
 import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/agent-types"
 import { acquireConnection } from "@/lib/mcp/pool"
 import { isMcpToolName } from "@/lib/mcp/types"
+import { buildOpenUISystemPrompt } from "@/lib/openui/prompt"
 
 interface ChatMessage {
   role: "system" | "user" | "assistant"
@@ -299,7 +300,22 @@ export async function POST(req: NextRequest) {
 
       try {
         const memoryBlock = formatMemoriesForPrompt(config.memories, query)
-        const systemPrompt = `${config.systemPrompt}${memoryBlock}\n\n${getToolSystemPrompt(config.enabledTools, customTools, mcpTools)}`
+        // OpenUI Pattern B: when openuiEnabled is on, swap the system
+        // prompt for the OpenUI-augmented one (cloud:false, self-hosted).
+        // This works with ANY provider — no THESYS_API_KEY required. The
+        // component spec tells the LLM which OpenUI Lang components it can
+        // emit; the client-side <Renderer> in trace-step.tsx mounts them.
+        // See docs/openui-integration.md §6.
+        const systemPrompt = config.openuiEnabled
+          ? buildOpenUISystemPrompt({
+              baseSystemPrompt: config.systemPrompt,
+              memories: config.memories,
+              query,
+              enabledTools: config.enabledTools,
+              customTools,
+              mcpTools,
+            })
+          : `${config.systemPrompt}${memoryBlock}\n\n${getToolSystemPrompt(config.enabledTools, customTools, mcpTools)}`
         const conversation: ChatMessage[] = [
           { role: "system", content: systemPrompt },
           ...history.map((h) => ({ role: h.role, content: h.content })),

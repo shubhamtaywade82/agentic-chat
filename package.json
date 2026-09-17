@@ -24,6 +24,8 @@
     "@hookform/resolvers": "^5.1.1",
     "@mdxeditor/editor": "^3.39.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@openuidev/lang-core": "^0.3.0",
+    "@openuidev/react-lang": "^0.3.0",
     "@prisma/client": "^6.11.1",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",

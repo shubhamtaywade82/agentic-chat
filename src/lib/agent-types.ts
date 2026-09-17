@@ -245,6 +245,13 @@ export interface AgentConfig {
   // dynamically. Each enabled server's tools are auto-discovered and injected
   // into the system prompt. See src/lib/mcp/* for the client manager.
   mcpServers: McpServerConfig[]
+  // OpenUI generative-UI rendering (Pattern B). When true, the system
+  // prompt is augmented with the OpenUI component spec (cloud:false,
+  // self-hosted — works with ANY provider, no THESYS_API_KEY required),
+  // and the Final Answer is rendered via <Renderer> instead of Markdown
+  // when `looksLikeOpenUILang(content)` returns true. See
+  // docs/openui-integration.md §3.B.
+  openuiEnabled: boolean
 }
 
 export interface ChatSession {
@@ -328,4 +335,5 @@ export const DEFAULT_CONFIG: AgentConfig = {
     testnet: false,
   },
   mcpServers: buildDefaultMcpServers(),
+  openuiEnabled: false,
 }
