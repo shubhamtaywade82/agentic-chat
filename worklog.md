@@ -230,3 +230,20 @@ Stage Summary:
 - Pattern B is now LIVE end-to-end. To try it: open Configure Agent → OpenUI tab → toggle "Enable OpenUI Generative-UI Rendering" ON → ask the agent something like "show me the price of BTC and the order book" → response renders as interactive BinancePriceCard + OrderBookTable components instead of a Markdown table.
 - Works with any provider (Ollama local, OpenAI, Groq, Anthropic, Gemini, custom). No THESYS_API_KEY required.
 - Markdown fallback is automatic — if the model doesn't emit valid OpenUI Lang, the existing Markdown renderer kicks in. UI never breaks.
+
+---
+Task ID: openui-gemma4-thought-strip
+Agent: main (Super Z)
+Task: Add Gemma 4 thinking-channel stripping to callLlm() so gemma4:26b / gemma4:31b work cleanly with both the ReAct parser and OpenUI Lang rendering.
+
+Work Log:
+- Added a post-processing step in src/app/api/agent/route.ts callLlm() that strips Gemma 4's `<|channel|>thought…<|channel|>` blocks from the model's response before returning.
+- The regex handles three cases: (1) closed thought blocks, (2) unclosed thought blocks (mid-stream), (3) any other stray `<|…|>` control tokens.
+- This is a no-op for non-Gemma providers (regex doesn't match) — zero risk to OpenAI/Anthropic/Groq/custom paths.
+- Rationale: Gemma 4 emits thought-channel tags even when thinking is "disabled" (per Ollama's Best Practices §2). Without stripping, the tags would leak into the answer bubble, break parseAction()'s `Thought:`/`Action:` regex matching, and cause <Renderer> to fall back to Markdown on every response.
+- Left the AVAILABLE_MODELS catalog UNTOUCHED — the live /models fetch from /api/models remains authoritative so users see new Ollama Cloud models (like gemma4) as soon as they're published, without a code change.
+
+Stage Summary:
+- Single-file diff: src/app/api/agent/route.ts (callLlm() post-processing).
+- Compatible with all 7 providers; required for Gemma 4.
+- No catalog changes — live /models fetch stays the source of truth.

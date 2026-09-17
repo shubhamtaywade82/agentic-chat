@@ -170,9 +170,33 @@ async function callLlm(
   }
 
   const json = await res.json()
-  const text = json.choices?.[0]?.message?.content || ""
+  const rawText = json.choices?.[0]?.message?.content || ""
   const tokensIn = json.usage?.prompt_tokens
   const tokensOut = json.usage?.completion_tokens
+
+  // ── Gemma 4 thinking-channel stripping ────────────────────────────
+  // Gemma 4 (e.g. gemma4:26b, gemma4:31b on Ollama Cloud) emits its
+  // internal reasoning wrapped in `<|channel|>thought\n…\n<channel|>`
+  // tags — even when thinking is disabled, the model emits an empty
+  // thought block. We strip these because:
+  //
+  //   1. The ReAct loop's parser (parseAction / parsePlan / extractFinalAnswer)
+  //      matches on `Thought:` / `Action:` / `Final Answer:` plain text —
+  //      `<|channel|>` tags would leak into the answer bubble.
+  //   2. OpenUI Lang generation: the `<Renderer>` would see the thought
+  //      block as malformed OpenUI Lang and fall back to Markdown.
+  //   3. Multi-turn conversations: Gemma 4's best-practices doc says
+  //      historical turns must contain only the final response, not
+  //      thoughts — so we'd corrupt the conversation history otherwise.
+  //
+  // This is a no-op for non-Gemma providers (the regex doesn't match).
+  // See: https://ollama.com/library/gemma4 (Best Practices §2)
+  const text = rawText
+    .replace(/<\|channel\|>thought[\s\S]*?<\|channel\|>/g, "")
+    .replace(/<\|channel\|>thought[\s\S]*?$/g, "") // unclosed (mid-stream)
+    .replace(/<\|[^|]*\|>/g, "") // any stray control tokens
+    .trim()
+
   return { text, tokensIn, tokensOut }
 }
 
