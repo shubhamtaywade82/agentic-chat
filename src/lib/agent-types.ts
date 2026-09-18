@@ -192,6 +192,7 @@ export interface ModelOption {
 export const AVAILABLE_MODELS: ModelOption[] = [
   { id: "llama3.2:3b", label: "Llama 3.2 3B (Ollama)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_local" },
   { id: "qwen3.5:4b", label: "Qwen 3.5 4B (Ollama)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_local" },
+  { id: "gemma4:31b", label: "Gemma 4 31B (Ollama Cloud)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_cloud" },
   { id: "gpt-4o", label: "GPT-4o (OpenAI)", contextWindow: 128_000, costPer1k: 5, provider: "openai" },
   { id: "gpt-4o-mini", label: "GPT-4o mini (OpenAI)", contextWindow: 128_000, costPer1k: 0.15, provider: "openai" },
   { id: "claude-3-5-sonnet", label: "Claude 3.5 Sonnet (Anthropic)", contextWindow: 200_000, costPer1k: 3, provider: "anthropic" },
@@ -282,7 +283,9 @@ INTENT DETECTION & WORKFLOW:
    - Thought: Reason about user intent and whether an external tool is required.
    - Action: Call the appropriate tool only if external data or computation is needed. If no tool is needed, proceed directly to Final Answer.
    - Observation: Inspect tool output carefully.
-   - Final Answer: Present your response in clean, rich GitHub-flavored Markdown.`
+   - Final Answer: Present your response in clean, rich GitHub-flavored Markdown.
+
+DIAGRAMS: If a diagram would clarify the answer, emit exactly one \`\`\`mermaid code block using a SINGLE diagram type (flowchart TD/LR, sequenceDiagram, classDiagram, etc.). Never mix syntax from different diagram types in the same block (e.g. do not put \`participant\`/\`->>\` sequence-diagram syntax inside a \`graph\`/\`flowchart\` block). Use valid Mermaid syntax only — CSS units in px (not dp), no stray metadata lines like "title=" inside the diagram body.`
 
 export const DEFAULT_CONFIG: AgentConfig = {
   modelId: "llama3.2:3b",

@@ -6,8 +6,8 @@ import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism"
-import { Check, Copy, AlertTriangle } from "lucide-react"
-import { useState, useMemo, useEffect, useId, useRef } from "react"
+import { Check, Copy, AlertTriangle, ZoomIn, ZoomOut, RotateCcw, Code2, Eye } from "lucide-react"
+import { useState, useMemo, useEffect, useId } from "react"
 import { cn } from "@/lib/utils"
 import "katex/dist/katex.min.css"
 
@@ -189,13 +189,52 @@ function CodeBlock({
   )
 }
 
-// Renders ```mermaid fences as diagrams. Mermaid needs a real DOM-safe id and
-// runs client-side only, so this stays isolated from the SSR-rendered markdown tree.
+// Small local models reliably declare `graph`/`flowchart` but then write a
+// full sequence-diagram body (participant + ->> arrows), plus a handful of
+// other invalid-but-predictable quirks. Repairing those before handing the
+// chart to mermaid fixes far more real responses than prompt-tuning alone.
+function normalizeMermaid(raw: string): string {
+  let text = raw.trim()
+
+  // Stray hallucinated metadata line, e.g. "title=Trading Bot Flow"
+  text = text.replace(/^\s*title\s*=.*$/gim, "")
+
+  // Header says graph/flowchart but the body is actually a sequence diagram
+  const looksLikeSequence = /^\s*participant\s+/m.test(text) || /-{1,2}>>/.test(text)
+  if (looksLikeSequence) {
+    text = text.replace(/^\s*(graph|flowchart)\s+\w+\s*$/im, "sequenceDiagram")
+    // `style` is a flowchart-only directive — invalid once retargeted to sequenceDiagram
+    text = text.replace(/^\s*style\s+.*$/gim, "")
+  }
+
+  // Only "left of" / "right of" / "over" are valid note positions
+  text = text.replace(/\bnote\s+(?:top|bottom)\s+(left|right)\s+of\b/gi, "note $1 of")
+
+  // Common unit typo: "2dp" instead of "2px"
+  text = text.replace(/(\d+)dp\b/g, "$1px")
+
+  return text.trim()
+}
+
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 3
+const ZOOM_STEP = 0.25
+
+// Renders ```mermaid fences as diagrams, with a toolbar to zoom the preview,
+// flip to raw source, and copy. Mermaid needs a real DOM-safe id and runs
+// client-side only, so this stays isolated from the SSR-rendered markdown tree.
 function MermaidBlock({ chart }: { chart: string }) {
   const rawId = useId().replace(/[^a-zA-Z0-9]/g, "")
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showCode, setShowCode] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  const [copied, setCopied] = useState(false)
+  const normalized = useMemo(() => normalizeMermaid(chart), [chart])
 
+  // Renders into state (not a ref's innerHTML) so the SVG survives the
+  // Preview/Code toggle unmounting the preview container — a ref write only
+  // happens once, at render time, and is lost when that DOM node goes away.
   useEffect(() => {
     let cancelled = false
     setError(null)
@@ -205,8 +244,8 @@ function MermaidBlock({ chart }: { chart: string }) {
       try {
         const isDark = document.documentElement.classList.contains("dark")
         mermaid.initialize({ startOnLoad: false, theme: isDark ? "dark" : "default", securityLevel: "strict" })
-        const { svg } = await mermaid.render(`mermaid-${rawId}`, chart)
-        if (!cancelled && containerRef.current) containerRef.current.innerHTML = svg
+        const { svg: rendered } = await mermaid.render(`mermaid-${rawId}`, normalized)
+        if (!cancelled) setSvg(rendered)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to render diagram")
       }
@@ -215,7 +254,13 @@ function MermaidBlock({ chart }: { chart: string }) {
     return () => {
       cancelled = true
     }
-  }, [chart, rawId])
+  }, [normalized, rawId])
+
+  const copy = () => {
+    navigator.clipboard.writeText(chart)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
 
   if (error) {
     return (
@@ -229,10 +274,58 @@ function MermaidBlock({ chart }: { chart: string }) {
     )
   }
 
+  const iconBtn = "flex items-center justify-center rounded p-1 text-zinc-400 transition hover:bg-white/10 hover:text-zinc-100"
+
   return (
-    <div
-      ref={containerRef}
-      className="my-3 flex justify-center overflow-x-auto rounded-lg border border-border bg-card/40 p-3"
-    />
+    <div className="group relative my-3 overflow-hidden rounded-lg border border-border bg-[#282c34] shadow-sm">
+      <div className="flex items-center justify-between border-b border-white/10 bg-black/30 px-3 py-1.5">
+        <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-zinc-400">mermaid</span>
+        <div className="flex items-center gap-0.5">
+          {!showCode && (
+            <>
+              <button onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))} className={iconBtn} aria-label="Zoom out">
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => setZoom(1)} className="w-10 text-center font-mono text-[10px] text-zinc-400 hover:text-zinc-100" aria-label="Reset zoom">
+                {Math.round(zoom * 100)}%
+              </button>
+              <button onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))} className={iconBtn} aria-label="Zoom in">
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => setZoom(1)} className={iconBtn} aria-label="Reset zoom to 100%">
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+              <div className="mx-1 h-3.5 w-px bg-white/10" />
+            </>
+          )}
+          <button onClick={() => setShowCode((v) => !v)} className={cn(iconBtn, "gap-1 px-1.5")} aria-label={showCode ? "Show preview" : "Show source"}>
+            {showCode ? <Eye className="h-3.5 w-3.5" /> : <Code2 className="h-3.5 w-3.5" />}
+            <span className="text-[10px]">{showCode ? "Preview" : "Code"}</span>
+          </button>
+          <button onClick={copy} className={cn(iconBtn, "gap-1 px-1.5")} aria-label="Copy source">
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </div>
+
+      {showCode ? (
+        <SyntaxHighlighter
+          language="text"
+          style={oneDark}
+          customStyle={{ margin: 0, background: "transparent", padding: "0.85rem 1rem", fontSize: "0.8rem", lineHeight: "1.5" }}
+          codeTagProps={{ style: { fontFamily: "var(--font-geist-mono), monospace" } }}
+        >
+          {chart}
+        </SyntaxHighlighter>
+      ) : (
+        <div className="max-h-[600px] min-h-[200px] overflow-auto bg-card/40 p-4">
+          <div
+            className="mx-auto w-full origin-top transition-transform duration-150 [&>svg]:h-auto [&>svg]:w-full [&>svg]:max-w-none"
+            style={{ transform: `scale(${zoom})` }}
+            dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
+          />
+        </div>
+      )}
+    </div>
   )
 }
