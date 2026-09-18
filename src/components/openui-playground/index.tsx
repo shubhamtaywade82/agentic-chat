@@ -157,12 +157,12 @@ export function OpenUIPlayground() {
 
           {/* Component Catalog summary */}
           <footer className="border-t border-border bg-card/40 p-2.5">
-            <p className="text-[10px] font-medium text-muted-foreground mb-1.5">Domain Component Library (10 Registered)</p>
+            <p className="text-[10px] font-medium text-muted-foreground mb-1.5">Domain Component Library (11 Registered)</p>
             <div className="flex flex-wrap gap-1">
               {[
                 "Stack", "Text", "BinancePriceCard", "OrderBookTable",
                 "TradeSetupCard", "FundingRateCard", "RiskCalculatorCard",
-                "StatBlock", "ActionButton", "MarkdownFallback",
+                "StatBlock", "ActionButton", "HtmlArtifact", "MarkdownFallback",
               ].map((name) => (
                 <Badge key={name} variant="secondary" className="font-mono text-[9px] py-0 px-1.5">
                   {name}

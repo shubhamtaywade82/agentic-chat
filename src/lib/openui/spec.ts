@@ -181,6 +181,20 @@ const ActionButton = defineComponent({
   component: null as never,
 })
 
+const HtmlArtifact = defineComponent({
+  name: "HtmlArtifact",
+  description:
+    "Renders arbitrary self-contained HTML (inline <style>/<script> allowed) " +
+    "in a sandboxed iframe with no access to the parent page. Use ONLY for " +
+    "one-off custom visuals no domain component covers — prefer the trading " +
+    "cards above, and MarkdownFallback for plain text.",
+  props: z.object({
+    html: z.string().describe("Self-contained HTML document or fragment to render."),
+    height: z.number().optional().describe("Iframe height in pixels. Default: 360."),
+  }),
+  component: null as never,
+})
+
 // ─── Assemble the spec library ────────────────────────────────────────
 
 /**
@@ -199,6 +213,7 @@ export const domainLibrarySpec = createLibrary({
     RiskCalculatorCard,
     StatBlock,
     ActionButton,
+    HtmlArtifact,
     MarkdownFallback,
   ],
 })

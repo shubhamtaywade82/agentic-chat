@@ -86,7 +86,9 @@ export function buildOpenUISystemPrompt(
         "Prefer FundingRateCard for binance_funding_rate results.",
         "Prefer RiskCalculatorCard for prop_risk_calculator results.",
         "Use multiple StatBlock tiles in a Stack for a quick-metrics summary.",
-        "If no domain component fits, wrap the Markdown in MarkdownFallback(\"...\").",
+        "For plain text/explanations with no domain component fit, use MarkdownFallback(\"...\"). " +
+          "For a genuinely custom visual (e.g. a one-off chart or diagram) no domain component " +
+          "covers, use HtmlArtifact instead — never inline raw <script>/<style> outside it.",
         "Continue to emit Plan/Thought/Action/Action Input as plain text during the ReAct loop — only the Final Answer uses OpenUI Lang.",
       ],
     },

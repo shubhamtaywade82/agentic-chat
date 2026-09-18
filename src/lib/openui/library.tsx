@@ -25,6 +25,9 @@ import {
   type ComponentRenderProps,
 } from "@openuidev/react-lang"
 import { z } from "zod"
+import { cn } from "@/lib/utils"
+import { Card } from "@/components/ui/card"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 
 // ─── Root layout components ───────────────────────────────────────────
 
@@ -123,11 +126,11 @@ const MarkdownFallback = defineComponent({
   component: function MarkdownFallback({ props }: ComponentRenderProps<unknown>) {
     const p = (props ?? {}) as { content?: string }
     return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <Card className="gap-0 rounded-xl border-border p-4 shadow-sm">
         <pre className="whitespace-pre-wrap break-words font-sans text-sm text-foreground">
           {p.content ?? ""}
         </pre>
-      </div>
+      </Card>
     )
   },
 })
@@ -169,7 +172,7 @@ const BinancePriceCard = defineComponent({
     }
     const up = (p.change24hPct ?? 0) >= 0
     return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <Card className="gap-0 rounded-xl border-border p-4 shadow-sm">
         <div className="flex items-baseline justify-between">
           <div className="text-xs font-mono text-muted-foreground">
             {p.symbol ?? "—"}
@@ -200,7 +203,7 @@ const BinancePriceCard = defineComponent({
             Vol: {p.volume24h.toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </div>
         )}
-      </div>
+      </Card>
     )
   },
 })
@@ -231,53 +234,49 @@ const OrderBookTable = defineComponent({
       asks?: Array<[number, number]>
     }
     const Row = ({ p, q, side }: { p: number; q: number; side: "bid" | "ask" }) => (
-      <tr className={side === "bid" ? "text-emerald-500" : "text-red-500"}>
-        <td className="px-2 py-0.5 text-right font-mono">
+      <TableRow className={cn("border-0 hover:bg-transparent", side === "bid" ? "text-emerald-500" : "text-red-500")}>
+        <TableCell className="h-auto px-2 py-0.5 text-right font-mono">
           {p.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-        </td>
-        <td className="px-2 py-0.5 text-right font-mono">
+        </TableCell>
+        <TableCell className="h-auto px-2 py-0.5 text-right font-mono">
           {q.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
     )
     return (
-      <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+      <Card className="gap-0 rounded-xl border-border p-3 shadow-sm">
         <div className="mb-2 text-xs font-mono text-muted-foreground">
           {p.symbol ?? "—"} · Order Book
         </div>
         <div className="grid grid-cols-2 gap-2 text-[11px]">
-          <div>
-            <table className="w-full">
-              <thead>
-                <tr className="text-muted-foreground">
-                  <th className="px-2 py-0.5 text-right">Bid</th>
-                  <th className="px-2 py-0.5 text-right">Qty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(p.bids ?? []).slice(0, 10).map(([bp, bq], i) => (
-                  <Row key={`b${i}`} p={bp} q={bq} side="bid" />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div>
-            <table className="w-full">
-              <thead>
-                <tr className="text-muted-foreground">
-                  <th className="px-2 py-0.5 text-right">Ask</th>
-                  <th className="px-2 py-0.5 text-right">Qty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(p.asks ?? []).slice(0, 10).map(([ap, aq], i) => (
-                  <Row key={`a${i}`} p={ap} q={aq} side="ask" />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-0 text-muted-foreground hover:bg-transparent">
+                <TableHead className="h-auto px-2 py-0.5 text-right">Bid</TableHead>
+                <TableHead className="h-auto px-2 py-0.5 text-right">Qty</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(p.bids ?? []).slice(0, 10).map(([bp, bq], i) => (
+                <Row key={`b${i}`} p={bp} q={bq} side="bid" />
+              ))}
+            </TableBody>
+          </Table>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-0 text-muted-foreground hover:bg-transparent">
+                <TableHead className="h-auto px-2 py-0.5 text-right">Ask</TableHead>
+                <TableHead className="h-auto px-2 py-0.5 text-right">Qty</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(p.asks ?? []).slice(0, 10).map(([ap, aq], i) => (
+                <Row key={`a${i}`} p={ap} q={aq} side="ask" />
+              ))}
+            </TableBody>
+          </Table>
         </div>
-      </div>
+      </Card>
     )
   },
 })
@@ -333,7 +332,7 @@ const TradeSetupCard = defineComponent({
         ? { color: "text-red-500", bg: "bg-red-500/10", label: "SHORT" }
         : { color: "text-muted-foreground", bg: "bg-muted", label: "NO TRADE" }
     return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <Card className="gap-0 rounded-xl border-border p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="text-xs font-mono text-muted-foreground">
             {p.symbol ?? "—"}
@@ -379,7 +378,7 @@ const TradeSetupCard = defineComponent({
             <span className="font-medium">Invalidation:</span> {p.invalidation}
           </div>
         )}
-      </div>
+      </Card>
     )
   },
 })
@@ -418,7 +417,7 @@ const FundingRateCard = defineComponent({
     const ratePct = p.currentRate != null ? p.currentRate * 100 : undefined
     const positive = (ratePct ?? 0) >= 0
     return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <Card className="gap-0 rounded-xl border-border p-4 shadow-sm">
         <div className="flex items-baseline justify-between">
           <div className="text-xs font-mono text-muted-foreground">
             {p.symbol ?? "—"} · Funding
@@ -456,7 +455,7 @@ const FundingRateCard = defineComponent({
             })}
           </div>
         )}
-      </div>
+      </Card>
     )
   },
 })
@@ -500,7 +499,7 @@ const RiskCalculatorCard = defineComponent({
       </div>
     )
     return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <Card className="gap-0 rounded-xl border-border p-4 shadow-sm">
         <div className="mb-2 text-xs font-mono text-muted-foreground">
           Risk Calculator
         </div>
@@ -517,7 +516,7 @@ const RiskCalculatorCard = defineComponent({
         {p.safeMaxLeverage != null && (
           <Row label="Safe Max Lev." value={`${Number(p.safeMaxLeverage).toFixed(1)}x`} />
         )}
-      </div>
+      </Card>
     )
   },
 })
@@ -555,7 +554,7 @@ const StatBlock = defineComponent({
         ? "text-amber-500"
         : "text-foreground"
     return (
-      <div className="rounded-lg border border-border bg-card p-3">
+      <Card className="gap-0 rounded-lg border-border p-3 shadow-none">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
           {p.label ?? "—"}
         </div>
@@ -565,7 +564,7 @@ const StatBlock = defineComponent({
         {p.sub && (
           <div className="mt-0.5 text-[10px] text-muted-foreground">{p.sub}</div>
         )}
-      </div>
+      </Card>
     )
   },
 })
@@ -609,6 +608,41 @@ const ActionButton = defineComponent({
   },
 })
 
+/**
+ * Escape hatch for one-off custom visuals no domain component covers.
+ * Renders in a sandboxed iframe (no `allow-same-origin`) — the generated
+ * HTML/JS can't reach the parent page, cookies, or our app's state.
+ */
+const HtmlArtifact = defineComponent({
+  name: "HtmlArtifact",
+  description:
+    "Renders arbitrary self-contained HTML (inline <style>/<script> allowed) " +
+    "in a sandboxed iframe with no access to the parent page. Use ONLY for " +
+    "one-off custom visuals no domain component covers — prefer the trading " +
+    "cards above, and MarkdownFallback for plain text.",
+  props: z.object({
+    html: z.string().describe("Self-contained HTML document or fragment to render."),
+    height: z.number().optional().describe("Iframe height in pixels. Default: 360."),
+  }),
+  component: function HtmlArtifact({ props }: ComponentRenderProps<unknown>) {
+    const p = (props ?? {}) as { html?: string; height?: number }
+    const html = p.html ?? ""
+    return (
+      // `key={html}` forces a fresh iframe per content change — setting
+      // `srcDoc` on an existing iframe node is unreliable in Chrome (can
+      // paint blank on first mount); a full remount always re-navigates.
+      <iframe
+        key={html}
+        srcDoc={html}
+        sandbox="allow-scripts"
+        title="Generated content"
+        className="w-full rounded-lg border border-border bg-white"
+        style={{ height: `${p.height ?? 360}px` }}
+      />
+    )
+  },
+})
+
 // ─── Assemble the library ─────────────────────────────────────────────
 
 export const domainLibrary = createLibrary({
@@ -626,6 +660,8 @@ export const domainLibrary = createLibrary({
     StatBlock,
     // Interactivity
     ActionButton,
+    // Escape hatch
+    HtmlArtifact,
     // Fallback
     MarkdownFallback,
   ],
