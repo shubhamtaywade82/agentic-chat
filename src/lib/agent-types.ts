@@ -61,6 +61,12 @@ export interface ObservationStep extends BaseStep {
 export interface AnswerStep extends BaseStep {
   kind: "answer"
   content: string
+  // Set by the server when the OpenUI system-prompt was activated for this
+  // turn (see shouldActivateOpenUI in lib/openui/detect.ts). The client only
+  // attempts OpenUI Lang parsing when this is true — otherwise a plain
+  // Markdown answer that incidentally resembles the DSL (e.g. code with
+  // `Type.new(...)` calls) could get misrouted into the OpenUI renderer.
+  openuiActive?: boolean
 }
 
 export type TraceStep =

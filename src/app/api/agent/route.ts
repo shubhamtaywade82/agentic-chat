@@ -465,6 +465,7 @@ export async function POST(req: NextRequest) {
                 kind: "answer",
                 iteration: currentIteration,
                 content: finalAnswer || content || "The model returned an empty response after multiple attempts. Try again or switch models.",
+                openuiActive: activateOpenUI,
               })
               finalAnswerFound = true
             }

@@ -2,11 +2,14 @@
 
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
+import rehypeKatex from "rehype-katex"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism"
-import { Check, Copy } from "lucide-react"
-import { useState, useMemo } from "react"
+import { Check, Copy, AlertTriangle } from "lucide-react"
+import { useState, useMemo, useEffect, useId, useRef } from "react"
 import { cn } from "@/lib/utils"
+import "katex/dist/katex.min.css"
 
 // Auto-detect and format raw unformatted JSON strings and unwrap redundant outer markdown code fences
 function prepareMarkdownContent(raw: string): string {
@@ -45,7 +48,8 @@ export function Markdown({ content, className }: { content: string; className?: 
   return (
     <div className={cn("md-body break-words", className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
           code(props) {
             const { children, className } = props as {
@@ -64,11 +68,13 @@ export function Markdown({ content, className }: { content: string; className?: 
             }
 
             const lang = match?.[1] || "text"
-            return (
-              <CodeBlock language={lang}>
-                {String(children).replace(/\n$/, "")}
-              </CodeBlock>
-            )
+            const code = String(children).replace(/\n$/, "")
+
+            if (lang === "mermaid") {
+              return <MermaidBlock chart={code} />
+            }
+
+            return <CodeBlock language={lang}>{code}</CodeBlock>
           },
           a(props) {
             return (
@@ -180,5 +186,53 @@ function CodeBlock({
         {children}
       </SyntaxHighlighter>
     </div>
+  )
+}
+
+// Renders ```mermaid fences as diagrams. Mermaid needs a real DOM-safe id and
+// runs client-side only, so this stays isolated from the SSR-rendered markdown tree.
+function MermaidBlock({ chart }: { chart: string }) {
+  const rawId = useId().replace(/[^a-zA-Z0-9]/g, "")
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setError(null)
+
+    import("mermaid").then(async ({ default: mermaid }) => {
+      if (cancelled) return
+      try {
+        const isDark = document.documentElement.classList.contains("dark")
+        mermaid.initialize({ startOnLoad: false, theme: isDark ? "dark" : "default", securityLevel: "strict" })
+        const { svg } = await mermaid.render(`mermaid-${rawId}`, chart)
+        if (!cancelled && containerRef.current) containerRef.current.innerHTML = svg
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to render diagram")
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [chart, rawId])
+
+  if (error) {
+    return (
+      <div className="my-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+        <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Couldn&apos;t render diagram — showing source
+        </div>
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground">{chart}</pre>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="my-3 flex justify-center overflow-x-auto rounded-lg border border-border bg-card/40 p-3"
+    />
   )
 }
