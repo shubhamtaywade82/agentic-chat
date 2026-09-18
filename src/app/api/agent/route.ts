@@ -4,6 +4,8 @@ import { formatMemoriesForPrompt } from "@/lib/memory-engine"
 import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/agent-types"
 import { acquireConnection } from "@/lib/mcp/pool"
 import { isMcpToolName } from "@/lib/mcp/types"
+import { buildOpenUISystemPrompt } from "@/lib/openui/prompt"
+import { shouldActivateOpenUI } from "@/lib/openui/detect"
 
 interface ChatMessage {
   role: "system" | "user" | "assistant"
@@ -169,9 +171,33 @@ async function callLlm(
   }
 
   const json = await res.json()
-  const text = json.choices?.[0]?.message?.content || ""
+  const rawText = json.choices?.[0]?.message?.content || ""
   const tokensIn = json.usage?.prompt_tokens
   const tokensOut = json.usage?.completion_tokens
+
+  // ── Gemma 4 thinking-channel stripping ────────────────────────────
+  // Gemma 4 (e.g. gemma4:26b, gemma4:31b on Ollama Cloud) emits its
+  // internal reasoning wrapped in `<|channel|>thought\n…\n<channel|>`
+  // tags — even when thinking is disabled, the model emits an empty
+  // thought block. We strip these because:
+  //
+  //   1. The ReAct loop's parser (parseAction / parsePlan / extractFinalAnswer)
+  //      matches on `Thought:` / `Action:` / `Final Answer:` plain text —
+  //      `<|channel|>` tags would leak into the answer bubble.
+  //   2. OpenUI Lang generation: the `<Renderer>` would see the thought
+  //      block as malformed OpenUI Lang and fall back to Markdown.
+  //   3. Multi-turn conversations: Gemma 4's best-practices doc says
+  //      historical turns must contain only the final response, not
+  //      thoughts — so we'd corrupt the conversation history otherwise.
+  //
+  // This is a no-op for non-Gemma providers (the regex doesn't match).
+  // See: https://ollama.com/library/gemma4 (Best Practices §2)
+  const text = rawText
+    .replace(/<\|channel\|>thought[\s\S]*?<\|channel\|>/g, "")
+    .replace(/<\|channel\|>thought[\s\S]*?$/g, "") // unclosed (mid-stream)
+    .replace(/<\|[^|]*\|>/g, "") // any stray control tokens
+    .trim()
+
   return { text, tokensIn, tokensOut }
 }
 
@@ -299,7 +325,21 @@ export async function POST(req: NextRequest) {
 
       try {
         const memoryBlock = formatMemoriesForPrompt(config.memories, query)
-        const systemPrompt = `${config.systemPrompt}${memoryBlock}\n\n${getToolSystemPrompt(config.enabledTools, customTools, mcpTools)}`
+        // OpenUI Pattern B: when openuiEnabled is on AND the query asks for
+        // market data / visual components (intent-based), swap the system
+        // prompt for the OpenUI-augmented one. For general programming or text
+        // queries, keep standard natural Markdown for speed and natural prose.
+        const activateOpenUI = config.openuiEnabled && shouldActivateOpenUI(query)
+        const systemPrompt = activateOpenUI
+          ? buildOpenUISystemPrompt({
+              baseSystemPrompt: config.systemPrompt,
+              memories: config.memories,
+              query,
+              enabledTools: config.enabledTools,
+              customTools,
+              mcpTools,
+            })
+          : `${config.systemPrompt}${memoryBlock}\n\n${getToolSystemPrompt(config.enabledTools, customTools, mcpTools)}`
         const conversation: ChatMessage[] = [
           { role: "system", content: systemPrompt },
           ...history.map((h) => ({ role: h.role, content: h.content })),
@@ -425,6 +465,7 @@ export async function POST(req: NextRequest) {
                 kind: "answer",
                 iteration: currentIteration,
                 content: finalAnswer || content || "The model returned an empty response after multiple attempts. Try again or switch models.",
+                openuiActive: activateOpenUI,
               })
               finalAnswerFound = true
             }

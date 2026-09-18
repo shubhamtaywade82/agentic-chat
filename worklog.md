@@ -185,3 +185,65 @@ Stage Summary:
 - Custom MCP servers (local stdio or remote HTTP/SSE) can be added/edited/toggled/removed from the new MCP tab in the Agent Configuration dialog.
 - Failures are isolated: a single broken server doesn't break the agent loop.
 - All work recorded in /home/z/my-project/worklog.md under Task ID 5.
+
+---
+Task ID: openui-spike-push
+Agent: main (Super Z)
+Task: Re-apply the OpenUI integration spike (previous workspace was reset) and push the feature branch to origin.
+
+Work Log:
+- Re-cloned shubhamtaywade82/agentic-chat to /home/z/my-project/repos/agentic-chat.
+- Re-created branch feature/openui-integration from main (19adb3b).
+- Re-applied Pattern A edits: src/lib/agent-types.ts (added openui_gateway to LlmProvider + DEFAULT_PROVIDER_URLS + a default ModelOption); src/app/api/models/route.ts (extended OpenAI-compatible branch to handle openui_gateway).
+- Re-applied Pattern B + D sketches: src/lib/openui/{detect,library,prompt,tool-provider}.ts and src/components/agent-chat/openui-answer.tsx.
+- Re-applied docs/openui-integration.md (full design doc: 4 patterns, rollout plan, code samples, risks).
+- Verified typecheck + lint clean (only pre-existing Prisma client error remains, unrelated to this spike).
+- Pushed feature/openui-integration to origin using the uploaded GitHub token.
+
+Stage Summary:
+- Branch: feature/openui-integration (pushed to origin).
+- Spike complete and ready for PR review.
+
+---
+Task ID: openui-pattern-b
+Agent: main (Super Z)
+Task: Wire OpenUI generative-UI rendering (Pattern B) end-to-end on the same feature branch — install @openuidev/* packages, mount <Renderer> in the answer step, add an "Enable OpenUI" toggle to the config dialog, augment the system prompt (cloud:false — works with ANY provider, no THESYS_API_KEY required). User wants "all the UI related things from openui in our agentic-chat".
+
+Work Log:
+- Installed @openuidev/react-lang + @openuidev/lang-core (skipped react-ui — peer-dep conflict with our zustand@5; we don't need the full <AgentInterface> chat surface, only the <Renderer>).
+- Activated src/lib/openui/library.tsx (renamed from .ts to support JSX): 10 domain components — Stack (root), Text, BinancePriceCard, OrderBookTable, TradeSetupCard, FundingRateCard, RiskCalculatorCard, StatBlock, ActionButton, MarkdownFallback. Each uses Zod v4 schemas for prop validation.
+- Created src/lib/openui/spec.ts — server-safe stub-only library (no React) using createLibrary/defineComponent from @openuidev/lang-core. Same component names/descriptions/props as library.tsx but with `component: null`. This is what prompt.ts imports for system-prompt generation on the server side.
+- Split rationale: prompt.ts is imported by /api/agent (server route). If it imported library.tsx, react-syntax-highlighter (pulled in transitively) would break SSR with "dl.createContext is not a function". The spec-only stubs produce the same JSON schema + prompt spec without any React code.
+- Activated src/lib/openui/prompt.ts: calls generateSystemPrompt({cloud:false, library:{schema, components, root, ...}}). cloud:false = self-hosted, works with ANY provider (Ollama, OpenAI, Groq, …) — no THESYS_API_KEY required.
+- Activated src/components/agent-chat/openui-answer.tsx: mounts <Renderer> from @openuidev/react-lang with the domain library + toolProvider.
+- Refactored src/lib/openui/tool-provider.ts: instead of importing executeLiveTool directly (which would drag @shubhamtaywade82/dhanhq-ts — a Node-only module needing 'readline' — into the client bundle), each tool function POSTs to a new /api/tool server route. This keeps server credentials and Node-only modules server-side.
+- Created src/app/api/tool/route.ts: server-side tool execution endpoint. Accepts {tool, args, config}, routes mcp__-prefixed names to the pooled McpClientManager, others to executeLiveTool. Returns {ok, data} or {ok:false, error}.
+- Added openuiEnabled:boolean to AgentConfig type + DEFAULT_CONFIG (defaults false — opt-in).
+- Added backfill in src/store/agent-store.ts hydrateFromStorage so old localStorage configs without openuiEnabled default to false.
+- Wired src/components/agent-chat/trace-step.tsx: added new AnswerBody component that branches on (openuiEnabled && looksLikeOpenUILang(content)) to mount <OpenUIAnswerRenderer> vs the existing <Markdown>. Falls back to Markdown automatically if the model emits plain text — UI never breaks.
+- Added new "OpenUI" tab (7th tab) to src/components/agent-chat/agent-config-dialog.tsx with: a switch to toggle openuiEnabled, a note about model-size recommendations, and a grid showing all 10 available components.
+- Wired src/app/api/agent/route.ts: when config.openuiEnabled is true, swap the system prompt builder to buildOpenUISystemPrompt (which injects the OpenUI component spec + rules). Otherwise, the existing prompt is unchanged.
+- Verified: tsc --noEmit clean (0 errors); eslint . clean (0 errors, 0 warnings); next build succeeds — all 16 routes build including the new /api/tool route.
+
+Stage Summary:
+- Branch: feature/openui-integration (will be force-updated on push).
+- Pattern B is now LIVE end-to-end. To try it: open Configure Agent → OpenUI tab → toggle "Enable OpenUI Generative-UI Rendering" ON → ask the agent something like "show me the price of BTC and the order book" → response renders as interactive BinancePriceCard + OrderBookTable components instead of a Markdown table.
+- Works with any provider (Ollama local, OpenAI, Groq, Anthropic, Gemini, custom). No THESYS_API_KEY required.
+- Markdown fallback is automatic — if the model doesn't emit valid OpenUI Lang, the existing Markdown renderer kicks in. UI never breaks.
+
+---
+Task ID: openui-gemma4-thought-strip
+Agent: main (Super Z)
+Task: Add Gemma 4 thinking-channel stripping to callLlm() so gemma4:26b / gemma4:31b work cleanly with both the ReAct parser and OpenUI Lang rendering.
+
+Work Log:
+- Added a post-processing step in src/app/api/agent/route.ts callLlm() that strips Gemma 4's `<|channel|>thought…<|channel|>` blocks from the model's response before returning.
+- The regex handles three cases: (1) closed thought blocks, (2) unclosed thought blocks (mid-stream), (3) any other stray `<|…|>` control tokens.
+- This is a no-op for non-Gemma providers (regex doesn't match) — zero risk to OpenAI/Anthropic/Groq/custom paths.
+- Rationale: Gemma 4 emits thought-channel tags even when thinking is "disabled" (per Ollama's Best Practices §2). Without stripping, the tags would leak into the answer bubble, break parseAction()'s `Thought:`/`Action:` regex matching, and cause <Renderer> to fall back to Markdown on every response.
+- Left the AVAILABLE_MODELS catalog UNTOUCHED — the live /models fetch from /api/models remains authoritative so users see new Ollama Cloud models (like gemma4) as soon as they're published, without a code change.
+
+Stage Summary:
+- Single-file diff: src/app/api/agent/route.ts (callLlm() post-processing).
+- Compatible with all 7 providers; required for Gemma 4.
+- No catalog changes — live /models fetch stays the source of truth.

@@ -22,6 +22,7 @@ interface AgentState {
   speed: number
   config: AgentConfig
   sidebarCollapsed: boolean
+  rightPanelCollapsed: boolean
   models: ModelOption[]
   isLoadingModels: boolean
   isLiveModels: boolean
@@ -51,6 +52,7 @@ interface AgentState {
   resetConfig: () => void
   setSidebarCollapsed: (v: boolean) => void
   toggleSidebar: () => void
+  toggleRightPanel: () => void
   createNewSession: () => void
   switchSession: (id: string) => void
   deleteSession: (id: string) => void
@@ -103,6 +105,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   speed: 1,
   config: DEFAULT_CONFIG,
   sidebarCollapsed: false,
+  rightPanelCollapsed: false,
   models: AVAILABLE_MODELS.filter((m) => m.provider === DEFAULT_CONFIG.provider),
   isLoadingModels: false,
   isLiveModels: false,
@@ -121,6 +124,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (parsed.systemPrompt?.includes("systematic prop trading ReAct agent")) {
         parsed.systemPrompt = DEFAULT_CONFIG.systemPrompt
       }
+      // Migrate the intent-first default prompt forward to pick up new Mermaid diagram guidance
+      if (parsed.systemPrompt?.includes("INTENT DETECTION & WORKFLOW") && !parsed.systemPrompt?.includes("DIAGRAMS:")) {
+        parsed.systemPrompt = DEFAULT_CONFIG.systemPrompt
+      }
+      // Ollama Cloud provider selected but still pointing at a local-only model
+      // (stale from before Cloud model support was added) — bump to Gemma 4 31B.
+      if (parsed.provider === "ollama_cloud" && parsed.modelId === "llama3.2:3b") {
+        parsed.modelId = "gemma4:31b"
+      }
       // Migrate deprecated api.ollama.com URL to direct ollama.com URL
       if (parsed.apiBaseUrl?.includes("api.ollama.com")) {
         parsed.apiBaseUrl = parsed.apiBaseUrl.replace("api.ollama.com", "ollama.com")
@@ -134,6 +146,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       parsed.enabledTools = parsed.enabledTools || { ...DEFAULT_CONFIG.enabledTools }
       parsed.dhan = { ...DEFAULT_CONFIG.dhan, ...(parsed.dhan || {}) }
       parsed.binance = { ...DEFAULT_CONFIG.binance, ...(parsed.binance || {}) }
+      // Backfill openuiEnabled for configs saved before OpenUI integration
+      // landed. Defaults to false (off) so existing users see no behavior
+      // change until they explicitly opt in via the OpenUI tab.
+      if (typeof parsed.openuiEnabled !== "boolean") {
+        parsed.openuiEnabled = false
+      }
 
       const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
       const activeId = parsedSessions[0]?.id || initialSessionId
@@ -194,9 +212,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   addApiKey: (key, label) => {
-    const newKey: ProviderApiKey = { id: `key_${Date.now()}`, label: label || `Key (${get().config.provider})`, key, provider: get().config.provider, createdAt: Date.now() }
+    const provider = get().config.provider
+    const newKey: ProviderApiKey = { id: `key_${Date.now()}`, label: label || `Key (${provider})`, key, provider, createdAt: Date.now() }
     const updated = [...(get().config.apiKeys || []), newKey]
-    get().updateConfig({ apiKeys: updated, apiKey: key })
+    // Ollama Cloud unlocks much larger models than the local default — once a
+    // key is configured, jump straight to Gemma 4 31B instead of leaving the
+    // 3B local model selected under the cloud provider.
+    const modelOverride = provider === "ollama_cloud" ? { modelId: "gemma4:31b" } : {}
+    get().updateConfig({ apiKeys: updated, apiKey: key, ...modelOverride })
   },
 
   removeApiKey: (id) => {
@@ -314,6 +337,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  toggleRightPanel: () => set((s) => ({ rightPanelCollapsed: !s.rightPanelCollapsed })),
 
   createNewSession: () => {
     const newId = `sess_${Date.now()}`

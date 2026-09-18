@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Settings, Cpu, Terminal, Wrench, RotateCcw,
   Sliders, Check, Trash2, Server, Cloud, Zap, Sparkles, RefreshCw, Loader2, KeyRound, Plus,
-  TrendingUp, Brain, Plug
+  TrendingUp, Brain, Plug, LayoutDashboard
 } from "lucide-react"
 import { useAgentStore } from "@/store/agent-store"
 import { AVAILABLE_TOOLS, DEFAULT_PROVIDER_URLS, LlmProvider } from "@/lib/agent-types"
@@ -26,7 +26,13 @@ import { MemoriesTab } from "./memories-tab"
 import { McpTab } from "./mcp-tab"
 import { cn } from "@/lib/utils"
 
-export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
+export function AgentConfigDialog({
+  trigger,
+  defaultTab = "model",
+}: {
+  trigger?: React.ReactNode
+  defaultTab?: string
+}) {
   const [open, setOpen] = useState(false)
   const [newKeyLabel, setNewKeyLabel] = useState("")
   const [newKeyValue, setNewKeyValue] = useState("")
@@ -88,25 +94,28 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          <Tabs defaultValue="model" className="w-full">
-            <TabsList className="grid w-full grid-cols-6 mb-4">
-              <TabsTrigger value="model" className="gap-1 text-xs">
+          <Tabs defaultValue={defaultTab} className="w-full">
+            <TabsList className="flex w-full overflow-x-auto scroll-thin mb-4 h-auto p-1 gap-1 justify-start">
+              <TabsTrigger value="model" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Cpu className="h-3.5 w-3.5" /> Model
               </TabsTrigger>
-              <TabsTrigger value="trading" className="gap-1 text-xs">
+              <TabsTrigger value="trading" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <TrendingUp className="h-3.5 w-3.5" /> Trading
               </TabsTrigger>
-              <TabsTrigger value="memories" className="gap-1 text-xs">
+              <TabsTrigger value="memories" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Brain className="h-3.5 w-3.5" /> Memory
               </TabsTrigger>
-              <TabsTrigger value="mcp" className="gap-1 text-xs">
+              <TabsTrigger value="mcp" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Plug className="h-3.5 w-3.5" /> MCP
               </TabsTrigger>
-              <TabsTrigger value="parameters" className="gap-1 text-xs">
+              <TabsTrigger value="parameters" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Sliders className="h-3.5 w-3.5" /> Persona
               </TabsTrigger>
-              <TabsTrigger value="tools" className="gap-1 text-xs">
+              <TabsTrigger value="tools" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Wrench className="h-3.5 w-3.5" /> Tools
+              </TabsTrigger>
+              <TabsTrigger value="openui" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
+                <LayoutDashboard className="h-3.5 w-3.5" /> OpenUI
               </TabsTrigger>
             </TabsList>
 
@@ -299,6 +308,64 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
                   </div>
                 )}
                 <CustomToolModal onSave={saveCustomTool} />
+              </div>
+            </TabsContent>
+
+            {/* TAB 6: OpenUI Generative-UI Rendering */}
+            <TabsContent value="openui" className="space-y-4">
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-border bg-card/60 p-3">
+                <div className="min-w-0 flex-1">
+                  <Label className="text-xs font-semibold flex items-center gap-1.5 mb-1">
+                    <LayoutDashboard className="h-3.5 w-3.5 text-emerald-500" />
+                    Enable OpenUI Generative-UI Rendering
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    When ON, the system prompt is augmented with the OpenUI component spec
+                    (self-hosted, no <code className="font-mono">THESYS_API_KEY</code> needed),
+                    and the Final Answer is rendered via <code className="font-mono">&lt;Renderer&gt;</code> instead
+                    of Markdown — turning responses into interactive cards, charts, and tables.
+                    Works with ANY provider (Ollama, OpenAI, Groq, …). Falls back to Markdown
+                    automatically if the model emits plain text.
+                  </p>
+                </div>
+                <Switch
+                  checked={config.openuiEnabled === true}
+                  onCheckedChange={(v) => updateConfig({ openuiEnabled: v })}
+                  disabled={isRunning}
+                  className="scale-90 mt-1"
+                />
+              </div>
+
+              <div className="rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 p-3">
+                <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+                  <strong>Note:</strong> the model must follow the OpenUI Lang spec for the
+                  renderer to engage. Larger models (GPT-4o, Claude 3.5, Llama 3.3 70B) work
+                  best. Small local models (Llama 3.2 3B) may emit malformed output — the
+                  detector will fall back to Markdown in that case so the UI never breaks.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-1.5">
+                <Label className="text-xs font-semibold mb-1.5 block">Available Components</Label>
+                <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
+                  {[
+                    ["Stack", "Vertical layout root"],
+                    ["Text", "Heading / label / muted text"],
+                    ["BinancePriceCard", "Live crypto price ticker"],
+                    ["OrderBookTable", "Bids/asks depth table"],
+                    ["TradeSetupCard", "SMC/ICT trade setup"],
+                    ["FundingRateCard", "Perp funding rate + history"],
+                    ["RiskCalculatorCard", "Position sizing & RRR"],
+                    ["StatBlock", "Generic KPI tile"],
+                    ["ActionButton", "Clickable tool-trigger button"],
+                    ["MarkdownFallback", "Markdown-in-a-card"],
+                  ].map(([name, desc]) => (
+                    <div key={name} className="flex flex-col rounded border border-border bg-card/60 px-2 py-1">
+                      <span className="text-emerald-600 dark:text-emerald-400">{name}</span>
+                      <span className="text-muted-foreground text-[9px]">{desc}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </TabsContent>
           </Tabs>

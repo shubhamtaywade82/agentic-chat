@@ -61,6 +61,12 @@ export interface ObservationStep extends BaseStep {
 export interface AnswerStep extends BaseStep {
   kind: "answer"
   content: string
+  // Set by the server when the OpenUI system-prompt was activated for this
+  // turn (see shouldActivateOpenUI in lib/openui/detect.ts). The client only
+  // attempts OpenUI Lang parsing when this is true — otherwise a plain
+  // Markdown answer that incidentally resembles the DSL (e.g. code with
+  // `Type.new(...)` calls) could get misrouted into the OpenUI renderer.
+  openuiActive?: boolean
 }
 
 export type TraceStep =
@@ -140,7 +146,21 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   { name: "dhan_market_summary", description: "Summarize technicals, PCR, OI walls, max pain for a symbol", icon: "file-spreadsheet", category: "indian_markets" },
 ]
 
-export type LlmProvider = "ollama_local" | "ollama_cloud" | "openai" | "anthropic" | "gemini" | "groq" | "custom"
+// OpenUI integration (Pattern A): the OpenUI Gateway
+// (https://api.thesys.dev/v1/embed) is an OpenAI-compatible inference
+// endpoint that auto-validates OpenUI Lang output mid-stream. Because
+// `callLlm` in src/app/api/agent/route.ts already speaks OpenAI Chat
+// Completions, no routing changes are needed — we just register the
+// provider and its base URL here. See docs/openui-integration.md §3.A.
+export type LlmProvider =
+  | "ollama_local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "groq"
+  | "custom"
+  | "openui_gateway"
 
 export const DEFAULT_PROVIDER_URLS: Record<LlmProvider, string> = {
   ollama_local: "http://localhost:11434",
@@ -150,6 +170,7 @@ export const DEFAULT_PROVIDER_URLS: Record<LlmProvider, string> = {
   gemini: "https://generativelanguage.googleapis.com",
   groq: "https://api.groq.com/openai/v1",
   custom: "",
+  openui_gateway: "https://api.thesys.dev/v1/embed",
 }
 
 export interface ProviderApiKey {
@@ -171,11 +192,16 @@ export interface ModelOption {
 export const AVAILABLE_MODELS: ModelOption[] = [
   { id: "llama3.2:3b", label: "Llama 3.2 3B (Ollama)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_local" },
   { id: "qwen3.5:4b", label: "Qwen 3.5 4B (Ollama)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_local" },
+  { id: "gemma4:31b", label: "Gemma 4 31B (Ollama Cloud)", contextWindow: 128_000, costPer1k: 0, provider: "ollama_cloud" },
   { id: "gpt-4o", label: "GPT-4o (OpenAI)", contextWindow: 128_000, costPer1k: 5, provider: "openai" },
   { id: "gpt-4o-mini", label: "GPT-4o mini (OpenAI)", contextWindow: 128_000, costPer1k: 0.15, provider: "openai" },
   { id: "claude-3-5-sonnet", label: "Claude 3.5 Sonnet (Anthropic)", contextWindow: 200_000, costPer1k: 3, provider: "anthropic" },
   { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash (Google)", contextWindow: 1_000_000, costPer1k: 0.1, provider: "gemini" },
   { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Groq)", contextWindow: 128_000, costPer1k: 0.5, provider: "groq" },
+  // OpenUI Gateway default. The Gateway routes to many underlying providers
+  // (openai/*, anthropic/*, etc.); this entry just gives the config dialog
+  // something to show before the user fetches the live model list.
+  { id: "openai/gpt-5", label: "GPT-5 via OpenUI Gateway", contextWindow: 128_000, costPer1k: 5, provider: "openui_gateway" },
 ]
 
 export type DhanAuthMode = "direct" | "endpoint"
@@ -226,6 +252,13 @@ export interface AgentConfig {
   // dynamically. Each enabled server's tools are auto-discovered and injected
   // into the system prompt. See src/lib/mcp/* for the client manager.
   mcpServers: McpServerConfig[]
+  // OpenUI generative-UI rendering (Pattern B). When true, the system
+  // prompt is augmented with the OpenUI component spec (cloud:false,
+  // self-hosted — works with ANY provider, no THESYS_API_KEY required),
+  // and the Final Answer is rendered via <Renderer> instead of Markdown
+  // when `looksLikeOpenUILang(content)` returns true. See
+  // docs/openui-integration.md §3.B.
+  openuiEnabled: boolean
 }
 
 export interface ChatSession {
@@ -250,7 +283,9 @@ INTENT DETECTION & WORKFLOW:
    - Thought: Reason about user intent and whether an external tool is required.
    - Action: Call the appropriate tool only if external data or computation is needed. If no tool is needed, proceed directly to Final Answer.
    - Observation: Inspect tool output carefully.
-   - Final Answer: Present your response in clean, rich GitHub-flavored Markdown.`
+   - Final Answer: Present your response in clean, rich GitHub-flavored Markdown.
+
+DIAGRAMS: If a diagram would clarify the answer, emit exactly one \`\`\`mermaid code block using a SINGLE diagram type (flowchart TD/LR, sequenceDiagram, classDiagram, etc.). Never mix syntax from different diagram types in the same block (e.g. do not put \`participant\`/\`->>\` sequence-diagram syntax inside a \`graph\`/\`flowchart\` block). Use valid Mermaid syntax only — CSS units in px (not dp), no stray metadata lines like "title=" inside the diagram body.`
 
 export const DEFAULT_CONFIG: AgentConfig = {
   modelId: "llama3.2:3b",
@@ -309,4 +344,5 @@ export const DEFAULT_CONFIG: AgentConfig = {
     testnet: false,
   },
   mcpServers: buildDefaultMcpServers(),
+  openuiEnabled: false,
 }

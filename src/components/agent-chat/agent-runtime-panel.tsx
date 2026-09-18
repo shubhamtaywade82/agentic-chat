@@ -2,13 +2,14 @@
 
 import { useAgentStore } from "@/store/agent-store"
 import { ReactLoopViz, derivePhase } from "./react-loop-viz"
-import { Activity, Coins, Brain, MessageSquare } from "lucide-react"
+import { Activity, Coins, Brain, MessageSquare, PanelRightClose } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { AVAILABLE_TOOLS } from "@/lib/agent-types"
 import { cn } from "@/lib/utils"
 
 export function AgentRuntimePanel() {
-  const { messages, isRunning, activeMessageId, config } = useAgentStore()
+  const { messages, isRunning, activeMessageId, config, toggleRightPanel } = useAgentStore()
 
   const activeMsg = messages.find((m) => m.id === activeMessageId) ?? (isRunning ? undefined : [...messages].reverse().find((m) => m.role === "agent"))
   const phase = derivePhase(activeMsg?.trace, isRunning)
@@ -28,16 +29,21 @@ export function AgentRuntimePanel() {
   return (
     <div className="flex h-full flex-col bg-card/50">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm">
-          <Activity className="h-4 w-4" />
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm">
+            <Activity className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold leading-tight">Agent Runtime</h2>
+            <p className="text-[10px] text-muted-foreground font-mono">
+              {config.provider.replace(/_/g, " ")} · {config.modelId}
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-sm font-semibold leading-tight">Agent Runtime</h2>
-          <p className="text-[10px] text-muted-foreground font-mono">
-            {config.provider.replace(/_/g, " ")} · {config.modelId}
-          </p>
-        </div>
+        <Button variant="ghost" size="icon" className="hidden h-7 w-7 xl:flex" onClick={toggleRightPanel} title="Collapse Agent Runtime panel">
+          <PanelRightClose className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Scroll Body */}

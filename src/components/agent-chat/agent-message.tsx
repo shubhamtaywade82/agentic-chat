@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion } from "framer-motion"
 import {
   Bot, Coins, Repeat, Clock, CheckCircle2, Loader2, Cpu,
@@ -28,6 +28,18 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
   const [systemOpen, setSystemOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const { exportTrace } = useAgentStore()
+
+  // Reasoning steps (everything but the final answer) stay expanded while
+  // the loop is running so the live ReAct visualization is visible, then
+  // auto-collapse once — the user can still re-expand freely afterward.
+  const priorSteps = trace.filter((s) => s.kind !== "answer")
+  const answerSteps = trace.filter((s) => s.kind === "answer")
+  const [stepsOpen, setStepsOpen] = useState(running)
+  const wasRunning = useRef(running)
+  useEffect(() => {
+    if (wasRunning.current && !running) setStepsOpen(false)
+    wasRunning.current = running
+  }, [running])
 
   const model = AVAILABLE_MODELS.find((m) => m.id === message.modelId)
   const hasSystem = Boolean(message.systemPrompt)
@@ -146,8 +158,21 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
         {/* Trace Timeline */}
         {trace.length > 0 ? (
           <div className="space-y-0">
-            {trace.map((step, i) => (
-              <TraceStepView key={step.id} step={step} index={i} isLast={i === trace.length - 1} />
+            {priorSteps.length > 0 && (
+              <Collapsible open={stepsOpen} onOpenChange={setStepsOpen} className="mb-1">
+                <CollapsibleTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
+                  <ChevronRight className={cn("h-3 w-3 transition-transform", stepsOpen && "rotate-90")} />
+                  {stepsOpen ? "Hide" : "Show"} {priorSteps.length} reasoning {priorSteps.length === 1 ? "step" : "steps"}
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  {priorSteps.map((step, i) => (
+                    <TraceStepView key={step.id} step={step} index={i} isLast={i === priorSteps.length - 1} />
+                  ))}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+            {answerSteps.map((step, i) => (
+              <TraceStepView key={step.id} step={step} index={priorSteps.length + i} isLast />
             ))}
           </div>
         ) : (
