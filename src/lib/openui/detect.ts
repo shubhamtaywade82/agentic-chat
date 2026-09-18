@@ -40,6 +40,23 @@ export function looksLikeOpenUILang(s: string | undefined | null): boolean {
 }
 
 /**
+ * Patterns that indicate the query benefits from OpenUI Generative UI components
+ * (crypto prices, order books, trade setups, funding rates, risk calculations, or UI cards).
+ */
+const OPENUI_INTENT_PATTERN =
+  /\b(price|ticker|order\s*book|depth|bid|ask|funding\s*rate|funding|trade\s*setup|setup|smc|ict|position\s*size|risk\s*calc|notional|margin|binance|dhan|btc|eth|sol|crypto|kpi|stat\s*block|card|cards|dashboard|widget|openui)\b/i
+
+/**
+ * Checks whether OpenUI system prompt augmentation should be activated for a query.
+ * Activates when the user query asks for market/trading data or graphical UI components.
+ * For general knowledge, coding, or text explanations, returns false so the LLM emits natural Markdown.
+ */
+export function shouldActivateOpenUI(query: string | undefined | null): boolean {
+  if (!query) return false
+  return OPENUI_INTENT_PATTERN.test(query)
+}
+
+/**
  * Normalizes OpenUI Lang output from models that emit named arguments with
  * colons (e.g. `Stack(gap: "md", children: [...])`) into the strict positional
  * syntax required by OpenUI Lang (`Stack("md", [...])`).

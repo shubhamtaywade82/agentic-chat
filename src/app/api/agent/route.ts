@@ -5,6 +5,7 @@ import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/
 import { acquireConnection } from "@/lib/mcp/pool"
 import { isMcpToolName } from "@/lib/mcp/types"
 import { buildOpenUISystemPrompt } from "@/lib/openui/prompt"
+import { shouldActivateOpenUI } from "@/lib/openui/detect"
 
 interface ChatMessage {
   role: "system" | "user" | "assistant"
@@ -324,13 +325,12 @@ export async function POST(req: NextRequest) {
 
       try {
         const memoryBlock = formatMemoriesForPrompt(config.memories, query)
-        // OpenUI Pattern B: when openuiEnabled is on, swap the system
-        // prompt for the OpenUI-augmented one (cloud:false, self-hosted).
-        // This works with ANY provider — no THESYS_API_KEY required. The
-        // component spec tells the LLM which OpenUI Lang components it can
-        // emit; the client-side <Renderer> in trace-step.tsx mounts them.
-        // See docs/openui-integration.md §6.
-        const systemPrompt = config.openuiEnabled
+        // OpenUI Pattern B: when openuiEnabled is on AND the query asks for
+        // market data / visual components (intent-based), swap the system
+        // prompt for the OpenUI-augmented one. For general programming or text
+        // queries, keep standard natural Markdown for speed and natural prose.
+        const activateOpenUI = config.openuiEnabled && shouldActivateOpenUI(query)
+        const systemPrompt = activateOpenUI
           ? buildOpenUISystemPrompt({
               baseSystemPrompt: config.systemPrompt,
               memories: config.memories,
