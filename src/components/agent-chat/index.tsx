@@ -156,7 +156,7 @@ export function AgentChat() {
 
         <main className="flex min-w-0 flex-1 flex-col">
           <div ref={scrollRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
+            <div className="mx-auto max-w-5xl space-y-6 px-4 py-6">
               {messages.length === 0 ? (
                 <EmptyState />
               ) : (
