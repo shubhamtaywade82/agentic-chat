@@ -26,7 +26,13 @@ import { MemoriesTab } from "./memories-tab"
 import { McpTab } from "./mcp-tab"
 import { cn } from "@/lib/utils"
 
-export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
+export function AgentConfigDialog({
+  trigger,
+  defaultTab = "model",
+}: {
+  trigger?: React.ReactNode
+  defaultTab?: string
+}) {
   const [open, setOpen] = useState(false)
   const [newKeyLabel, setNewKeyLabel] = useState("")
   const [newKeyValue, setNewKeyValue] = useState("")
@@ -88,27 +94,27 @@ export function AgentConfigDialog({ trigger }: { trigger?: React.ReactNode }) {
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          <Tabs defaultValue="model" className="w-full">
-            <TabsList className="grid w-full grid-cols-7 mb-4">
-              <TabsTrigger value="model" className="gap-1 text-xs">
+          <Tabs defaultValue={defaultTab} className="w-full">
+            <TabsList className="flex w-full overflow-x-auto scroll-thin mb-4 h-auto p-1 gap-1 justify-start">
+              <TabsTrigger value="model" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Cpu className="h-3.5 w-3.5" /> Model
               </TabsTrigger>
-              <TabsTrigger value="trading" className="gap-1 text-xs">
+              <TabsTrigger value="trading" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <TrendingUp className="h-3.5 w-3.5" /> Trading
               </TabsTrigger>
-              <TabsTrigger value="memories" className="gap-1 text-xs">
+              <TabsTrigger value="memories" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Brain className="h-3.5 w-3.5" /> Memory
               </TabsTrigger>
-              <TabsTrigger value="mcp" className="gap-1 text-xs">
+              <TabsTrigger value="mcp" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Plug className="h-3.5 w-3.5" /> MCP
               </TabsTrigger>
-              <TabsTrigger value="parameters" className="gap-1 text-xs">
+              <TabsTrigger value="parameters" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Sliders className="h-3.5 w-3.5" /> Persona
               </TabsTrigger>
-              <TabsTrigger value="tools" className="gap-1 text-xs">
+              <TabsTrigger value="tools" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <Wrench className="h-3.5 w-3.5" /> Tools
               </TabsTrigger>
-              <TabsTrigger value="openui" className="gap-1 text-xs">
+              <TabsTrigger value="openui" className="gap-1 text-xs shrink-0 py-1.5 px-2.5">
                 <LayoutDashboard className="h-3.5 w-3.5" /> OpenUI
               </TabsTrigger>
             </TabsList>
