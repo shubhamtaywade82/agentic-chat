@@ -21,6 +21,7 @@ import {
   createLibrary,
   defineComponent,
   useTriggerAction,
+  useRenderNode,
   type ComponentRenderProps,
 } from "@openuidev/react-lang"
 import { z } from "zod"
@@ -48,16 +49,22 @@ const Stack = defineComponent({
   }),
   component: function Stack({ props }: ComponentRenderProps<unknown>) {
     const p = (props ?? {}) as { gap?: string; children?: unknown[] }
+    const renderNode = useRenderNode()
     const gapClass =
       p.gap === "xs" ? "gap-1"
       : p.gap === "sm" ? "gap-2"
       : p.gap === "lg" ? "gap-6"
       : "gap-4"
-    // Coerce children to ReactNode[] — OpenUI passes parsed sub-elements
-    // as `unknown[]`; React can render them but TS needs the cast.
-    const children = (p.children ?? []) as React.ReactNode[]
+    const children = Array.isArray(p.children) ? p.children : []
     return (
-      <div className={`flex flex-col ${gapClass}`}>{children}</div>
+      <div className={`flex flex-col ${gapClass}`}>
+        {children.map((child, i) => {
+          if (child && typeof child === "object") {
+            return <div key={i}>{renderNode(child as Parameters<typeof renderNode>[0])}</div>
+          }
+          return <div key={i}>{String(child)}</div>
+        })}
+      </div>
     )
   },
 })

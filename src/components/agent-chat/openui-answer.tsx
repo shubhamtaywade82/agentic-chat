@@ -17,11 +17,13 @@
  * invoke the same tools the agent already uses — no duplicate code paths.
  */
 
+import { useMemo } from "react"
 import { Renderer } from "@openuidev/react-lang"
 import type { McpServerConfig } from "@/lib/agent-types"
 import { useAgentStore } from "@/store/agent-store"
 import { buildToolProvider } from "@/lib/openui/tool-provider"
 import { domainLibrary } from "@/lib/openui/library"
+import { normalizeOpenUILang } from "@/lib/openui/detect"
 
 export interface OpenUIAnswerRendererProps {
   /** The streaming or final answer text (OpenUI Lang). */
@@ -46,6 +48,9 @@ export function OpenUIAnswerRenderer({
     mcpServerConfig,
   })
 
+  // Normalize model output (e.g. named arguments with colons) into positional syntax
+  const normalizedContent = useMemo(() => normalizeOpenUILang(content), [content])
+
   const handleError = (errors: unknown) => {
     // OpenUI surfaces parse errors here. The renderer itself renders a
     // `MarkdownFallback` card for unknown roots, so the user still sees
@@ -58,7 +63,7 @@ export function OpenUIAnswerRenderer({
 
   return (
     <Renderer
-      response={content}
+      response={normalizedContent}
       library={domainLibrary}
       isStreaming={isStreaming}
       toolProvider={toolProvider}

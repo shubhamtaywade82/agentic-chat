@@ -78,14 +78,15 @@ export function buildOpenUISystemPrompt(
         "that doesn't fit a domain component — never emit raw Markdown at " +
         "the top level.",
       additionalRules: [
-        "ALWAYS start your Final Answer with `Stack(` — never with raw text or Markdown.",
+        "ALWAYS start your Final Answer with `root = Stack(...)` — never with raw text or Markdown.",
+        "Arguments are strictly positional: write `Stack(\"md\", [items])`, NOT `Stack(gap: \"md\", children: [items])`. Never use parameter names with colons.",
         "Prefer BinancePriceCard over a Markdown table for a single price.",
         "Prefer OrderBookTable when showing depth.",
         "Prefer TradeSetupCard for any prop_scan_setups or prop_evaluate_pair result.",
         "Prefer FundingRateCard for binance_funding_rate results.",
         "Prefer RiskCalculatorCard for prop_risk_calculator results.",
         "Use multiple StatBlock tiles in a Stack for a quick-metrics summary.",
-        "If no domain component fits, wrap the Markdown in MarkdownFallback(content: \"...\").",
+        "If no domain component fits, wrap the Markdown in MarkdownFallback(\"...\").",
         "Continue to emit Plan/Thought/Action/Action Input as plain text during the ReAct loop — only the Final Answer uses OpenUI Lang.",
       ],
     },

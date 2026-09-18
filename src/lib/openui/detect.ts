@@ -23,8 +23,11 @@
 export function looksLikeOpenUILang(s: string | undefined | null): boolean {
   if (!s || s.length < 4) return false
 
-  // PascalCase component call at the start (ignoring whitespace).
+  // PascalCase component call at the start (e.g. Stack(...))
   if (/^\s*[A-Z][A-Za-z0-9_]*\s*\(/.test(s)) return true
+
+  // OpenUI Lang assignment at the start (e.g. root = Stack(...) or comp = Text(...))
+  if (/^\s*(root|[a-z_][a-z0-9_]*)\s*=\s*[A-Z][A-Za-z0-9_]*\s*\(/.test(s)) return true
 
   // OpenUI Lang action statements anywhere in the body.
   if (/@(Run|Set|Reset|ToAssistant|OpenUrl)\b/.test(s)) return true
@@ -34,4 +37,17 @@ export function looksLikeOpenUILang(s: string | undefined | null): boolean {
   if (/\bMutation\s*\(/.test(s)) return true
 
   return false
+}
+
+/**
+ * Normalizes OpenUI Lang output from models that emit named arguments with
+ * colons (e.g. `Stack(gap: "md", children: [...])`) into the strict positional
+ * syntax required by OpenUI Lang (`Stack("md", [...])`).
+ */
+export function normalizeOpenUILang(input: string | undefined | null): string {
+  if (!input) return ""
+  return input.replace(
+    /([,(]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(?=[\[{"'\d\-a-zA-Z])/g,
+    "$1"
+  )
 }
