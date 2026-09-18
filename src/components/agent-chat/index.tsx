@@ -10,7 +10,7 @@ import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
 import { AgentConfigDialog } from "./agent-config-dialog"
 import { LiveTickerBar } from "./live-ticker-bar"
-import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard } from "lucide-react"
+import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
@@ -31,6 +31,8 @@ export function AgentChat() {
   const hydrateFromStorage = useAgentStore((s) => s.hydrateFromStorage)
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
+  const rightPanelCollapsed = useAgentStore((s) => s.rightPanelCollapsed)
+  const toggleRightPanel = useAgentStore((s) => s.toggleRightPanel)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -135,6 +137,12 @@ export function AgentChat() {
           {/* Theme Toggle Button */}
           <ThemeToggle />
 
+          {rightPanelCollapsed && (
+            <Button variant="ghost" size="icon" className="hidden h-7 w-7 xl:flex" onClick={toggleRightPanel} title="Expand Agent Runtime panel">
+              <PanelRightOpen className="h-4 w-4" />
+            </Button>
+          )}
+
           {messages.length > 0 && (
             <Button variant="ghost" size="sm" onClick={clear} className="h-7 gap-1 px-2 text-[10px] text-muted-foreground hover:text-destructive">
               <Trash2 className="h-3 w-3" /> Clear
@@ -173,9 +181,11 @@ export function AgentChat() {
           <ChatInput />
         </main>
 
-        <aside className="hidden h-full w-[300px] shrink-0 overflow-hidden border-l border-border xl:block">
-          <AgentRuntimePanel />
-        </aside>
+        {!rightPanelCollapsed && (
+          <aside className="hidden h-full w-[300px] shrink-0 overflow-hidden border-l border-border xl:block">
+            <AgentRuntimePanel />
+          </aside>
+        )}
       </div>
 
       {/* Footer */}

@@ -22,6 +22,7 @@ interface AgentState {
   speed: number
   config: AgentConfig
   sidebarCollapsed: boolean
+  rightPanelCollapsed: boolean
   models: ModelOption[]
   isLoadingModels: boolean
   isLiveModels: boolean
@@ -51,6 +52,7 @@ interface AgentState {
   resetConfig: () => void
   setSidebarCollapsed: (v: boolean) => void
   toggleSidebar: () => void
+  toggleRightPanel: () => void
   createNewSession: () => void
   switchSession: (id: string) => void
   deleteSession: (id: string) => void
@@ -103,6 +105,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   speed: 1,
   config: DEFAULT_CONFIG,
   sidebarCollapsed: false,
+  rightPanelCollapsed: false,
   models: AVAILABLE_MODELS.filter((m) => m.provider === DEFAULT_CONFIG.provider),
   isLoadingModels: false,
   isLiveModels: false,
@@ -334,6 +337,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  toggleRightPanel: () => set((s) => ({ rightPanelCollapsed: !s.rightPanelCollapsed })),
 
   createNewSession: () => {
     const newId = `sess_${Date.now()}`
