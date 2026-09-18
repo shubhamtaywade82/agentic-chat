@@ -17,13 +17,44 @@
  * invoke the same tools the agent already uses — no duplicate code paths.
  */
 
-import { useMemo } from "react"
+import React, { Component, useMemo, type ReactNode } from "react"
 import { Renderer } from "@openuidev/react-lang"
 import type { McpServerConfig } from "@/lib/agent-types"
 import { useAgentStore } from "@/store/agent-store"
 import { buildToolProvider } from "@/lib/openui/tool-provider"
 import { domainLibrary } from "@/lib/openui/library"
 import { normalizeOpenUILang } from "@/lib/openui/detect"
+import { Markdown } from "@/components/agent-chat/markdown"
+
+interface ErrorBoundaryProps {
+  children: ReactNode
+  fallbackContent: string
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean
+}
+
+class OpenUIErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false }
+
+  static getDerivedStateFromError(): ErrorBoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: Error) {
+    if (typeof console !== "undefined") {
+      console.warn("[openui] renderer runtime error, falling back to markdown:", error)
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <Markdown content={this.props.fallbackContent} />
+    }
+    return this.props.children
+  }
+}
 
 export interface OpenUIAnswerRendererProps {
   /** The streaming or final answer text (OpenUI Lang). */
@@ -62,13 +93,15 @@ export function OpenUIAnswerRenderer({
   }
 
   return (
-    <Renderer
-      response={normalizedContent}
-      library={domainLibrary}
-      isStreaming={isStreaming}
-      toolProvider={toolProvider}
-      onError={handleError}
-    />
+    <OpenUIErrorBoundary fallbackContent={content}>
+      <Renderer
+        response={normalizedContent}
+        library={domainLibrary}
+        isStreaming={isStreaming}
+        toolProvider={toolProvider}
+        onError={handleError}
+      />
+    </OpenUIErrorBoundary>
   )
 }
 
