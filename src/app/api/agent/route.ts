@@ -4,6 +4,7 @@ import { formatMemoriesForPrompt } from "@/lib/memory-engine"
 import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/agent-types"
 import { acquireConnection } from "@/lib/mcp/pool"
 import { isMcpToolName } from "@/lib/mcp/types"
+import { createNexumSession, nexumHostUrl, streamNexumRun, type NexumRunEvent } from "@/lib/nexum-client"
 
 interface ChatMessage {
   role: "system" | "user" | "assistant"
@@ -267,6 +268,86 @@ function extractFinalAnswer(content: string): string {
   return content.replace(/^Thought:[\s\S]*?(?=\n\s*(?:Final Answer:|$))/i, "").replace(/^Final Answer:\s*/i, "").trim() || content
 }
 
+/**
+ * Runs one turn through an external `nexum serve` host instead of the
+ * in-process ReAct loop below, translating Nexum's NexumRunEvent stream
+ * into the exact same `{kind, iteration, ...}` wire events this route has
+ * always emitted — src/store/agent-store.ts (the only consumer) needs no
+ * changes either way. See src/lib/nexum-client.ts for the scope/limits of
+ * this first integration slice (no history/tool-config forwarding yet).
+ */
+async function runViaNexum(
+  send: (data: Record<string, unknown>) => void,
+  baseUrl: string,
+  query: string,
+): Promise<void> {
+  let iteration = 1
+  const toolIteration = new Map<string, number>()
+
+  try {
+    const sessionId = await createNexumSession(baseUrl)
+
+    for await (const event of streamNexumRun(baseUrl, sessionId, query)) {
+      switch (event.type) {
+        case "plan.updated": {
+          const e = event as NexumRunEvent & { goal: string; steps: { id: string; text: string; done: boolean }[] }
+          send({ kind: "plan", iteration, goal: e.goal, steps: e.steps })
+          break
+        }
+        case "thought": {
+          const e = event as NexumRunEvent & { text: string }
+          send({
+            kind: "thinking",
+            iteration,
+            title: iteration === 1 ? "Analyzing user query & plan" : `Iterative reasoning (cycle ${iteration})`,
+            reasoning: e.text,
+          })
+          break
+        }
+        case "tool.started": {
+          const e = event as NexumRunEvent & { callId: string; name: string; args: Record<string, unknown> }
+          toolIteration.set(e.callId, iteration)
+          send({
+            kind: "tool_call",
+            iteration,
+            toolName: e.name,
+            description: `Calling ${e.name} with parameters`,
+            args: e.args,
+          })
+          break
+        }
+        case "tool.completed": {
+          const e = event as NexumRunEvent & { callId: string; name: string; result: Record<string, unknown> }
+          const it = toolIteration.get(e.callId) ?? iteration
+          const summary =
+            typeof e.result?.summary === "string" ? (e.result.summary as string) : JSON.stringify(e.result).slice(0, 200)
+          send({ kind: "observation", iteration: it, source: e.name, summary, data: e.result })
+          iteration = it + 1
+          break
+        }
+        case "run.completed": {
+          const e = event as NexumRunEvent & { output: string }
+          send({ kind: "answer", iteration, content: e.output })
+          break
+        }
+        case "run.failed": {
+          const e = event as NexumRunEvent & { error: string }
+          send({ kind: "answer", iteration, content: `⚠️ **Agent Error**: ${e.error}` })
+          break
+        }
+        case "run.cancelled": {
+          send({ kind: "answer", iteration, content: "⚠️ Run cancelled." })
+          break
+        }
+        // "run.started" and "model.used" have no matching TraceStep kind — nothing to render.
+      }
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    send({ kind: "answer", iteration, content: `⚠️ **Agent Error** (Nexum host): ${message}` })
+  }
+}
+
 export async function POST(req: NextRequest) {
   const { query, history = [], config, customTools = [] } = (await req.json()) as {
     query: string
@@ -280,6 +361,19 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       const send = (data: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+      }
+
+      // ── Nexum host adapter (Phase 4) ─────────────────────────────────
+      // When NEXUM_HOST_URL is configured, delegate the whole turn to an
+      // external `nexum serve` process instead of running the in-process
+      // ReAct loop below. Unset by default — existing behavior is
+      // unchanged until this env var is explicitly opted into.
+      const nexumUrl = nexumHostUrl()
+      if (nexumUrl) {
+        await runViaNexum(send, nexumUrl, query)
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+        controller.close()
+        return
       }
 
       // ── MCP server bootstrap (pooled) ────────────────────────────────
