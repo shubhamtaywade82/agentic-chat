@@ -279,14 +279,13 @@ function extractFinalAnswer(content: string): string {
 async function runViaNexum(
   send: (data: Record<string, unknown>) => void,
   baseUrl: string,
+  sessionId: string,
   query: string,
 ): Promise<void> {
   let iteration = 1
   const toolIteration = new Map<string, number>()
 
   try {
-    const sessionId = await createNexumSession(baseUrl)
-
     for await (const event of streamNexumRun(baseUrl, sessionId, query)) {
       switch (event.type) {
         case "plan.updated": {
@@ -349,11 +348,28 @@ async function runViaNexum(
 }
 
 export async function POST(req: NextRequest) {
-  const { query, history = [], config, customTools = [] } = (await req.json()) as {
+  const { query, history = [], config, customTools = [], nexumSessionId } = (await req.json()) as {
     query: string
     history?: { role: "user" | "assistant"; content: string }[]
     config: AgentConfig
     customTools?: CustomTool[]
+    /** A Nexum host session from a prior turn in this chat, if one exists —
+     * reused instead of minting a fresh Nexum session per message so the
+     * conversation is continuous on the Nexum side too. */
+    nexumSessionId?: string
+  }
+
+  // Resolved (or created) BEFORE the stream starts, not inside it, so it
+  // can ride back to the client as a response header — src/store/agent-store.ts
+  // persists it onto the ChatSession for the next turn to reuse.
+  const nexumUrl = nexumHostUrl()
+  let resolvedNexumSessionId: string | null = null
+  if (nexumUrl) {
+    try {
+      resolvedNexumSessionId = nexumSessionId || (await createNexumSession(nexumUrl))
+    } catch {
+      // Surfaced as a normal run.failed-shaped error inside the stream below.
+    }
   }
 
   const encoder = new TextEncoder()
@@ -363,14 +379,17 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
       }
 
-      // ── Nexum host adapter (Phase 4) ─────────────────────────────────
+      // ── Nexum host adapter (Phase 4/5) ────────────────────────────────
       // When NEXUM_HOST_URL is configured, delegate the whole turn to an
       // external `nexum serve` process instead of running the in-process
       // ReAct loop below. Unset by default — existing behavior is
       // unchanged until this env var is explicitly opted into.
-      const nexumUrl = nexumHostUrl()
       if (nexumUrl) {
-        await runViaNexum(send, nexumUrl, query)
+        if (resolvedNexumSessionId) {
+          await runViaNexum(send, nexumUrl, resolvedNexumSessionId, query)
+        } else {
+          send({ kind: "answer", iteration: 1, content: "⚠️ **Agent Error** (Nexum host): could not create a session — is `nexum serve` running?" })
+        }
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))
         controller.close()
         return
@@ -554,11 +573,12 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  })
+  const headers: Record<string, string> = {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  }
+  if (resolvedNexumSessionId) headers["X-Nexum-Session-Id"] = resolvedNexumSessionId
+
+  return new Response(stream, { headers })
 }

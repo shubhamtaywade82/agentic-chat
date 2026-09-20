@@ -2,20 +2,24 @@
  * Thin client for the Nexum Local Host's Session/Run/Event API
  * (nexum's src/protocol/types.ts + src/host/server.ts).
  *
- * This is the Phase 4 compatibility adapter (see the merge architecture
- * doc): when NEXUM_HOST_URL is set, /api/agent proxies to a running
- * `nexum serve` process instead of running the in-process ReAct loop.
- * When unset, the existing in-process loop in route.ts is untouched.
+ * When NEXUM_HOST_URL is set, /api/agent proxies to a running `nexum
+ * serve` process instead of running the in-process ReAct loop. When
+ * unset, the existing in-process loop in route.ts is untouched.
  *
- * Scope for this first vertical slice: one ephemeral Nexum session per
- * chat turn (not per browser ChatSession) — agentic-chat already resends
- * full `history` per request today, so this preserves that stateless-per-
- * request shape. Cross-turn continuity living on the Nexum side (so the
- * agent remembers earlier tool calls without replaying history text) is
- * explicitly Phase 5 ("Replace local sessions") work, not this adapter's.
- * Likewise, tool execution and model config for a Nexum-routed turn are
- * whatever the `nexum serve` process itself is configured with — this
- * client does not forward agentic-chat's AgentConfig/live-tools/MCP pool.
+ * Session continuity (Phase 5 — "Unified Sessions + Runs"): one Nexum
+ * session is created per browser ChatSession (on its first turn) and
+ * reused for every subsequent turn — route.ts passes the id back via the
+ * X-Nexum-Session-Id response header, and src/store/agent-store.ts
+ * persists it onto the ChatSession. Nexum's own AgentRuntime keeps that
+ * session's conversation state (src/host/agent-registry.ts on the nexum
+ * side), so a Nexum-routed chat has real multi-turn memory now, not just
+ * the `history` array agentic-chat still also sends for the in-process
+ * fallback path.
+ *
+ * Still out of scope for this adapter: tool execution and model config
+ * for a Nexum-routed turn come from whatever `nexum serve` itself is
+ * configured with, not from agentic-chat's AgentConfig/live-tools/MCP
+ * pool — unifying those is a later phase (ModelGateway / ToolGateway).
  */
 
 export interface NexumRunEvent {

@@ -443,9 +443,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const res = await fetch("/api/agent", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text, history, config, customTools: config.customTools }),
+        body: JSON.stringify({ query: text, history, config, customTools: config.customTools, nexumSessionId: currentSession?.nexumSessionId }),
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
+
+      // When routed through a Nexum host (NEXUM_HOST_URL), the server hands
+      // back the session it ran this turn against — persist it so the next
+      // turn in this chat reuses the same Nexum session instead of minting
+      // a fresh one (route.ts's X-Nexum-Session-Id header).
+      const nexumSessionIdFromResponse = res.headers.get("X-Nexum-Session-Id")
+      if (nexumSessionIdFromResponse && nexumSessionIdFromResponse !== currentSession?.nexumSessionId) {
+        set((s) => {
+          const updated = s.sessions.map((sess) =>
+            sess.id === activeSessionId ? { ...sess, nexumSessionId: nexumSessionIdFromResponse } : sess,
+          )
+          if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+          return { sessions: updated }
+        })
+      }
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()

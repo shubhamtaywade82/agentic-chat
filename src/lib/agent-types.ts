@@ -234,6 +234,11 @@ export interface ChatSession {
   createdAt: number
   updatedAt: number
   messages: AgentMessage[]
+  /** The Nexum host session this chat is bound to, once the first turn has
+   * created one (src/lib/nexum-client.ts). Reused for every subsequent
+   * turn in this chat instead of minting a fresh Nexum session per
+   * message — see /api/agent's NEXUM_HOST_URL branch. */
+  nexumSessionId?: string
 }
 
 export const DEFAULT_SYSTEM_PROMPT = `You are an advanced, versatile ReAct agent. You can assist with general knowledge, software engineering, mathematics, and problem solving, as well as execute real-time tools across multiple domains.
