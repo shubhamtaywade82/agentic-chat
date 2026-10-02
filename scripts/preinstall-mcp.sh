@@ -53,9 +53,9 @@ SPECS=(
   "sequentialthinking|npx|@modelcontextprotocol/server-sequential-thinking|find ~/.npm/_npx -type d -name 'server-sequential-thinking' 2>/dev/null | head -1 | grep -q ."
   "everything|npx|@modelcontextprotocol/server-everything|find ~/.npm/_npx -type d -name 'server-everything' 2>/dev/null | head -1 | grep -q ."
   "filesystem|npx|@modelcontextprotocol/server-filesystem|find ~/.npm/_npx -type d -name 'server-filesystem' 2>/dev/null | head -1 | grep -q ."
-  "time|uvx|mcp-server-time|find /var/cache/uv ~/.cache/uv -type d -name 'mcp_server_time' 2>/dev/null | head -1 | grep -q ."
-  "fetch|uvx|mcp-server-fetch|find /var/cache/uv ~/.cache/uv -type d -name 'mcp_server_fetch*' 2>/dev/null | head -1 | grep -q ."
-  "git|uvx|mcp-server-git|find /var/cache/uv ~/.cache/uv -type d -name 'mcp_server_git' 2>/dev/null | head -1 | grep -q ."
+  "time|uvx|mcp-server-time|find ${UV_CACHE_DIR:-} $(uv cache dir 2>/dev/null) /var/cache/uv ~/.cache/uv -type d -name 'mcp_server_time' 2>/dev/null | head -1 | grep -q ."
+  "fetch|uvx|mcp-server-fetch|find ${UV_CACHE_DIR:-} $(uv cache dir 2>/dev/null) /var/cache/uv ~/.cache/uv -type d -name 'mcp_server_fetch*' 2>/dev/null | head -1 | grep -q ."
+  "git|uvx|mcp-server-git|find ${UV_CACHE_DIR:-} $(uv cache dir 2>/dev/null) /var/cache/uv ~/.cache/uv -type d -name 'mcp_server_git' 2>/dev/null | head -1 | grep -q ."
 )
 
 # Count available runtimes
@@ -72,9 +72,16 @@ fi
 [ "$have_npx" = "false" ] && warn "npx not found — skipping npm-based MCP servers"
 [ "$have_uvx" = "false" ] && warn "uvx not found — skipping PyPI-based MCP servers"
 
-# Set a long timeout for the install phase (first-time downloads can be slow)
-# but a short timeout for the verify phase.
-INSTALL_TIMEOUT=180   # 3 minutes per package for first download
+# Ensure uv has access to an appropriate Python interpreter
+if [ "$have_uvx" = "true" ]; then
+  if ! uv python find ">=3.10" >/dev/null 2>&1; then
+    warn "Python >= 3.10 not found by uv — attempting automatic install via uv..."
+    uv python install 3.12 >/dev/null 2>&1 || warn "uv python install failed; uvx may not work"
+  fi
+fi
+
+# Set timeout for the install phase (first-time downloads)
+INSTALL_TIMEOUT=45    # 45 seconds per package
 VERIFY_TIMEOUT=15     # 15 seconds for cached verification
 
 installed=0
@@ -112,51 +119,34 @@ for spec in "${SPECS[@]}"; do
 
   log "warming cache for $name ($package)..."
   if [ "$runtime" = "npx" ]; then
-    # Spawn the server in the background. It will download & cache the
-    # package, then block waiting for stdio input. We poll the npx cache
-    # directory until the package appears, then kill the server.
-    timeout 180 npx --yes "$package" </dev/null >/dev/null 2>&1 &
-    PID=$!
-    # Wait up to 3 min for the package to appear in the cache
-    WAITED=0
-    while [ "$WAITED" -lt 180 ]; do
-      if timeout 5 bash -c "$verify_cmd" >/dev/null 2>&1; then
-        break
-      fi
-      sleep 2
-      WAITED=$((WAITED + 2))
-    done
-    kill "$PID" 2>/dev/null || true
-    wait "$PID" 2>/dev/null || true
+    timeout "$INSTALL_TIMEOUT" npx --yes "$package" </dev/null >/dev/null 2>&1 &
+  else
+    timeout "$INSTALL_TIMEOUT" uvx --quiet "$package" </dev/null >/dev/null 2>&1 &
+  fi
+  PID=$!
+
+  WAITED=0
+  while [ "$WAITED" -lt "$INSTALL_TIMEOUT" ]; do
     if timeout 5 bash -c "$verify_cmd" >/dev/null 2>&1; then
-      log "OK: $name (cached after ${WAITED}s)"
-      installed=$((installed + 1))
-    else
-      err "FAILED: $name (not in cache after ${WAITED}s)"
-      failed=$((failed + 1))
-      failed_names+=("$name")
+      break
     fi
-  else  # uvx
-    timeout 180 uvx --quiet "$package" </dev/null >/dev/null 2>&1 &
-    PID=$!
-    WAITED=0
-    while [ "$WAITED" -lt 180 ]; do
-      if timeout 5 bash -c "$verify_cmd" >/dev/null 2>&1; then
-        break
-      fi
-      sleep 2
-      WAITED=$((WAITED + 2))
-    done
-    kill "$PID" 2>/dev/null || true
-    wait "$PID" 2>/dev/null || true
-    if timeout 5 bash -c "$verify_cmd" >/dev/null 2>&1; then
-      log "OK: $name (cached after ${WAITED}s)"
-      installed=$((installed + 1))
-    else
-      err "FAILED: $name (not in cache after ${WAITED}s)"
-      failed=$((failed + 1))
-      failed_names+=("$name")
+    if ! kill -0 "$PID" 2>/dev/null; then
+      break
     fi
+    sleep 2
+    WAITED=$((WAITED + 2))
+  done
+
+  kill "$PID" 2>/dev/null || true
+  wait "$PID" 2>/dev/null || true
+
+  if timeout 5 bash -c "$verify_cmd" >/dev/null 2>&1; then
+    log "OK: $name (cached after ${WAITED}s)"
+    installed=$((installed + 1))
+  else
+    err "FAILED: $name (not in cache after ${WAITED}s)"
+    failed=$((failed + 1))
+    failed_names+=("$name")
   fi
 done
 
