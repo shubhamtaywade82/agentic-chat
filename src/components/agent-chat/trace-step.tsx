@@ -218,7 +218,6 @@ function AnswerBody({
   meta: (typeof KIND_META)[keyof typeof KIND_META]
 }) {
   const openuiEnabled = useAgentStore((s) => s.config.openuiEnabled === true)
-  const mcpServers = useAgentStore((s) => s.config.mcpServers)
   const content = step.content ?? ""
   const useOpenUI = openuiEnabled && step.openuiActive === true && looksLikeOpenUILang(content)
   const running = step.status === "running"
@@ -229,7 +228,6 @@ function AnswerBody({
         <OpenUIAnswerRenderer
           content={content}
           isStreaming={running}
-          mcpServerConfig={mcpServers}
         />
       ) : (
         <Markdown content={content} />

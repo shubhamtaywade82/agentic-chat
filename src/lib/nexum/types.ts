@@ -46,6 +46,12 @@ export interface CreateRunParams {
   timeoutMs?: number;
 }
 
+export interface ToolResult {
+  ok: boolean;
+  data: Record<string, unknown>;
+  error?: { code: string; message: string };
+}
+
 export interface InteractionResolution {
   approved?: boolean;
   response?: string;

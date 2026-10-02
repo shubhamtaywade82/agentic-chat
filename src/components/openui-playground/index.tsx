@@ -189,7 +189,6 @@ export function OpenUIPlayground() {
               <OpenUIAnswerRenderer
                 content={code}
                 isStreaming={false}
-                mcpServerConfig={config.mcpServers || []}
               />
             </div>
           </div>

@@ -9,17 +9,13 @@
  * parses the streaming content into a tree of domain components (charts,
  * cards, tables) and renders them live as tokens arrive.
  *
- * The tool provider bridges to:
- *   - `executeLiveTool` for built-in tools (binance_*, dhan_*, calculator, …)
- *   - `McpClientManager` (pooled) for MCP tools (`mcp__*`)
- *
- * Both are reused from the existing ReAct loop, so a generated button can
- * invoke the same tools the agent already uses — no duplicate code paths.
+ * Tool calls from generated components go to the chat's Nexum session
+ * (see src/lib/openui/tool-provider.ts), so a generated button uses the same
+ * tools, credentials and policy as the agent — no browser-side execution.
  */
 
 import React, { Component, useMemo, type ReactNode } from "react"
 import { Renderer } from "@openuidev/react-lang"
-import type { McpServerConfig } from "@/lib/agent-types"
 import { useAgentStore } from "@/store/agent-store"
 import { buildToolProvider } from "@/lib/openui/tool-provider"
 import { domainLibrary } from "@/lib/openui/library"
@@ -61,23 +57,16 @@ export interface OpenUIAnswerRendererProps {
   content: string
   /** True while the SSE stream is still pushing tokens. */
   isStreaming: boolean
-  /** MCP server config — used to bridge MCP tools into the renderer. */
-  mcpServerConfig: McpServerConfig[]
 }
 
 export function OpenUIAnswerRenderer({
   content,
   isStreaming,
-  mcpServerConfig,
 }: OpenUIAnswerRendererProps) {
-  const config = useAgentStore((s) => s.config)
-
-  const toolProvider = buildToolProvider({
-    customTools: config.customTools,
-    dhan: config.dhan,
-    binance: config.binance,
-    mcpServerConfig,
-  })
+  const nexumSessionId = useAgentStore(
+    (s) => s.sessions.find((sess) => sess.id === s.activeSessionId)?.nexumSessionId,
+  )
+  const toolProvider = useMemo(() => buildToolProvider(nexumSessionId), [nexumSessionId])
 
   // Normalize model output (e.g. named arguments with colons) into positional syntax
   const normalizedContent = useMemo(() => normalizeOpenUILang(content), [content])

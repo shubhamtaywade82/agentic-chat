@@ -5,6 +5,7 @@ import { NexumRunsClient } from "./runs";
 import { NexumEventsClient, type EventsUrlBuilder } from "./events";
 import { NexumInteractionsClient } from "./interactions";
 import { NexumCapabilitiesClient } from "./capabilities";
+import { NexumToolsClient } from "./tools";
 
 export class NexumClient implements RequestExecutor, EventsUrlBuilder {
   readonly baseUrl: string;
@@ -16,6 +17,7 @@ export class NexumClient implements RequestExecutor, EventsUrlBuilder {
   readonly events: NexumEventsClient;
   readonly interactions: NexumInteractionsClient;
   readonly capabilities: NexumCapabilitiesClient;
+  readonly tools: NexumToolsClient;
 
   constructor(options: NexumClientOptions = {}) {
     const rawUrl =
@@ -37,6 +39,7 @@ export class NexumClient implements RequestExecutor, EventsUrlBuilder {
     this.events = new NexumEventsClient(this);
     this.interactions = new NexumInteractionsClient(this);
     this.capabilities = new NexumCapabilitiesClient(this);
+    this.tools = new NexumToolsClient(this);
   }
 
   buildUrl(path: string): string {

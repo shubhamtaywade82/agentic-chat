@@ -5,4 +5,5 @@ export * from "./runs";
 export * from "./events";
 export * from "./interactions";
 export * from "./capabilities";
+export * from "./tools";
 export * from "./client";
