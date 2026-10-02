@@ -42,6 +42,7 @@ export interface CreateRunParams {
   goal: string;
   strategy?: string;
   outputFormat?: OutputFormat;
+  openuiSpec?: string;
   timeoutMs?: number;
 }
 

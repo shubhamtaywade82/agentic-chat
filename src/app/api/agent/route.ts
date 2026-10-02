@@ -4,9 +4,9 @@ import { formatMemoriesForPrompt } from "@/lib/memory-engine"
 import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/agent-types"
 import { acquireConnection } from "@/lib/mcp/pool"
 import { isMcpToolName } from "@/lib/mcp/types"
-import { buildOpenUISystemPrompt } from "@/lib/openui/prompt"
+import { buildNexumOpenUISpec, buildOpenUISystemPrompt } from "@/lib/openui/prompt"
 import { shouldActivateOpenUI } from "@/lib/openui/detect"
-import { createNexumSession, nexumHostUrl, streamNexumRun, type NexumRunEvent, type NexumRunOutput } from "@/lib/nexum-client"
+import { createNexumSession, nexumHostUrl, streamNexumRun, type CreateRunParams, type NexumRunEvent, type NexumRunOutput } from "@/lib/nexum-client"
 
 interface ChatMessage {
   role: "system" | "user" | "assistant"
@@ -306,13 +306,13 @@ async function runViaNexum(
   send: (data: Record<string, unknown>) => void,
   baseUrl: string,
   sessionId: string,
-  query: string,
+  runParams: CreateRunParams,
 ): Promise<void> {
   let iteration = 1
   const toolIteration = new Map<string, number>()
 
   try {
-    for await (const event of streamNexumRun(baseUrl, sessionId, query)) {
+    for await (const event of streamNexumRun(baseUrl, sessionId, runParams)) {
       switch (event.type) {
         case "plan.updated": {
           const e = event as NexumRunEvent & { goal: string; steps: { id: string; text: string; done: boolean }[] }
@@ -352,7 +352,7 @@ async function runViaNexum(
         }
         case "run.completed": {
           const e = event as NexumRunEvent & { output: NexumRunOutput }
-          send({ kind: "answer", iteration, content: e.output.content })
+          send({ kind: "answer", iteration, content: e.output.content, openuiActive: e.output.format === "openui" })
           break
         }
         case "run.failed": {
@@ -417,7 +417,12 @@ export async function POST(req: NextRequest) {
       // unchanged until this env var is explicitly opted into.
       if (nexumUrl) {
         if (resolvedNexumSessionId) {
-          await runViaNexum(send, nexumUrl, resolvedNexumSessionId, query)
+          // Nexum decides whether UI fits the answer and labels the format;
+          // the client only offers its component spec.
+          const runParams: CreateRunParams = config.openuiEnabled
+            ? { goal: query, outputFormat: "openui", openuiSpec: buildNexumOpenUISpec() }
+            : { goal: query }
+          await runViaNexum(send, nexumUrl, resolvedNexumSessionId, runParams)
         } else {
           send({ kind: "answer", iteration: 1, content: "⚠️ **Agent Error** (Nexum host): could not create a session — is `nexum serve` running?" })
         }
