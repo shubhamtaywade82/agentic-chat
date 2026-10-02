@@ -270,7 +270,7 @@ export interface ChatSession {
   /** The Nexum host session this chat is bound to, once the first turn has
    * created one (src/lib/nexum-client.ts). Reused for every subsequent
    * turn in this chat instead of minting a fresh Nexum session per
-   * message — see /api/agent's NEXUM_HOST_URL branch. */
+   * message — see /api/agent. */
   nexumSessionId?: string
 }
 

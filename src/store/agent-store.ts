@@ -471,7 +471,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
 
-      // When routed through a Nexum host (NEXUM_HOST_URL), the server hands
+      // When routed through Nexum (the default; not in legacy mode), the server hands
       // back the session it ran this turn against — persist it so the next
       // turn in this chat reuses the same Nexum session instead of minting
       // a fresh one (route.ts's X-Nexum-Session-Id header).

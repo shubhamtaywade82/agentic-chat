@@ -16,9 +16,8 @@ export type NexumRunEvent = RunEventEnvelope["payload"] & {
   [key: string]: unknown;
 };
 
-export function nexumHostUrl(): string | null {
-  const raw = process.env.NEXUM_HOST_URL ?? process.env.NEXUM_SERVER_URL;
-  if (!raw) return null;
+export function nexumHostUrl(): string {
+  const raw = process.env.NEXUM_HOST_URL ?? process.env.NEXUM_SERVER_URL ?? "http://127.0.0.1:3777";
   return raw.replace(/\/$/, "");
 }
 
