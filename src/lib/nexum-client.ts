@@ -38,7 +38,11 @@ export function nexumHostUrl(): string | null {
 export class NexumHostError extends Error {}
 
 export async function createNexumSession(baseUrl: string): Promise<string> {
-  const res = await fetch(`${baseUrl}/sessions`, { method: "POST" });
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = process.env.NEXUM_SERVER_TOKEN || process.env.NEXUM_TOKEN;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${baseUrl}/sessions`, { method: "POST", headers });
   if (!res.ok) {
     throw new NexumHostError(`Nexum host POST /sessions failed: ${res.status} ${await safeText(res)}`);
   }
@@ -48,9 +52,8 @@ export async function createNexumSession(baseUrl: string): Promise<string> {
 
 /**
  * Starts a run and yields each NexumRunEvent as the host streams it.
- * Mirrors the SSE framing agentic-chat's own /api/agent route already
- * uses (`data: <json>\n\n`), so the parsing logic here is deliberately
- * the same shape as src/store/agent-store.ts's reader loop.
+ * Conforms to Server Protocol v1: POST /sessions/:id/runs returns 201 Created
+ * with { run: { id } }, and live events are streamed via GET /runs/:id/events.
  */
 export async function* streamNexumRun(
   baseUrl: string,
@@ -58,18 +61,33 @@ export async function* streamNexumRun(
   goal: string,
   signal?: AbortSignal,
 ): AsyncGenerator<NexumRunEvent> {
-  const res = await fetch(`${baseUrl}/sessions/${encodeURIComponent(sessionId)}/runs`, {
+  const token = process.env.NEXUM_SERVER_TOKEN || process.env.NEXUM_TOKEN;
+  const authHeaders: Record<string, string> = {};
+  if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+
+  const runRes = await fetch(`${baseUrl}/sessions/${encodeURIComponent(sessionId)}/runs`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { ...authHeaders, "Content-Type": "application/json" },
     body: JSON.stringify({ goal }),
     signal,
   });
 
-  if (!res.ok || !res.body) {
-    throw new NexumHostError(`Nexum host run failed: ${res.status} ${await safeText(res)}`);
+  if (!runRes.ok) {
+    throw new NexumHostError(`Nexum host run creation failed: ${runRes.status} ${await safeText(runRes)}`);
   }
 
-  const reader = res.body.getReader();
+  const { run } = (await runRes.json()) as { run: { id: string } };
+
+  const sseRes = await fetch(`${baseUrl}/runs/${encodeURIComponent(run.id)}/events`, {
+    headers: { ...authHeaders, Accept: "text/event-stream" },
+    signal,
+  });
+
+  if (!sseRes.ok || !sseRes.body) {
+    throw new NexumHostError(`Nexum host run stream failed: ${sseRes.status} ${await safeText(sseRes)}`);
+  }
+
+  const reader = sseRes.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -83,10 +101,16 @@ export async function* streamNexumRun(
       while ((boundary = buffer.indexOf("\n\n")) !== -1) {
         const raw = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
-        const line = raw.replace(/^data:\s*/, "").trim();
-        if (!line) continue;
+        const dataLine = raw
+          .split("\n")
+          .find((l) => l.startsWith("data:"))
+          ?.replace(/^data:\s*/, "")
+          .trim();
+        if (!dataLine) continue;
         try {
-          yield JSON.parse(line) as NexumRunEvent;
+          const parsed = JSON.parse(dataLine) as { payload?: NexumRunEvent; type?: string };
+          const event = (parsed.payload ?? parsed) as NexumRunEvent;
+          yield event;
         } catch {
           // malformed SSE line — skip rather than abort the whole run
         }
