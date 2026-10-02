@@ -45,6 +45,12 @@ export function FuturesDashboard() {
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Agent Chat
           </Link>
+          <Link
+            href="/openui"
+            className="flex items-center gap-1.5 rounded-lg border border-border/80 px-2.5 py-1 text-xs text-muted-foreground transition hover:border-border hover:text-foreground"
+          >
+            OpenUI
+          </Link>
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-700 font-bold text-white shadow-sm">
             TA
           </div>

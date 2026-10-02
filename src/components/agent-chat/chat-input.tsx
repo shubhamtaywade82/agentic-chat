@@ -52,7 +52,7 @@ export function ChatInput() {
 
   return (
     <div className="border-t border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="mx-auto max-w-3xl px-4 py-3">
+      <div className="mx-auto max-w-5xl px-4 py-3">
         {/* example chips */}
         {!isRunning && text.length === 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">

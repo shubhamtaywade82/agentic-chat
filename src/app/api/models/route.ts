@@ -46,8 +46,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // OpenAI or Groq or OpenAI-compatible endpoint
-    if ((provider === "openai" || provider === "groq" || provider === "custom") && apiKey) {
+    // OpenAI or Groq or OpenUI Gateway or any OpenAI-compatible endpoint.
+    // OpenUI Gateway (https://api.thesys.dev/v1/embed) is OpenAI-compatible
+    // and exposes /v1/models; the same fetch path works for it. See
+    // docs/openui-integration.md §3.A.
+    if (
+      (provider === "openai" || provider === "groq" ||
+       provider === "custom" || provider === "openui_gateway") &&
+      apiKey
+    ) {
       const url = `${baseUrl || "https://api.openai.com/v1"}/models`
       const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } })
       if (res.ok) {

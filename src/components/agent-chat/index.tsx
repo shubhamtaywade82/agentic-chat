@@ -10,12 +10,13 @@ import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
 import { AgentConfigDialog } from "./agent-config-dialog"
 import { LiveTickerBar } from "./live-ticker-bar"
-import { Bot, PanelLeft, PanelLeftOpen, Trash2, Zap, Settings, LineChart } from "lucide-react"
+import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { DEFAULT_CONFIG } from "@/lib/agent-types"
+import { cn } from "@/lib/utils"
 
 const emptySubscribe = () => () => {}
 
@@ -25,10 +26,13 @@ export function AgentChat() {
   const isRunning = useAgentStore((s) => s.isRunning)
   const activeMessageId = useAgentStore((s) => s.activeMessageId)
   const config = useAgentStore((s) => s.config)
+  const updateConfig = useAgentStore((s) => s.updateConfig)
   const clear = useAgentStore((s) => s.clear)
   const hydrateFromStorage = useAgentStore((s) => s.hydrateFromStorage)
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
+  const rightPanelCollapsed = useAgentStore((s) => s.rightPanelCollapsed)
+  const toggleRightPanel = useAgentStore((s) => s.toggleRightPanel)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -91,6 +95,30 @@ export function AgentChat() {
             </Link>
           </Button>
 
+          <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+            <Link href="/openui">
+              <LayoutDashboard className="h-3 w-3 text-muted-foreground" />
+              <span className="hidden sm:inline">OpenUI</span>
+            </Link>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => updateConfig({ openuiEnabled: !config.openuiEnabled })}
+            className={cn(
+              "h-7 gap-1.5 px-2 text-xs font-mono transition",
+              config.openuiEnabled
+                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title={config.openuiEnabled ? "OpenUI Generative UI: ON (click to disable)" : "OpenUI Generative UI: OFF (click to enable)"}
+          >
+            <LayoutDashboard className="h-3 w-3" />
+            <span className="hidden md:inline">OpenUI:</span>
+            <span>{config.openuiEnabled ? "ON" : "OFF"}</span>
+          </Button>
+
           <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
             <Zap className="h-2.5 w-2.5" /> Real LLM
           </Badge>
@@ -108,6 +136,12 @@ export function AgentChat() {
 
           {/* Theme Toggle Button */}
           <ThemeToggle />
+
+          {rightPanelCollapsed && (
+            <Button variant="ghost" size="icon" className="hidden h-7 w-7 xl:flex" onClick={toggleRightPanel} title="Expand Agent Runtime panel">
+              <PanelRightOpen className="h-4 w-4" />
+            </Button>
+          )}
 
           {messages.length > 0 && (
             <Button variant="ghost" size="sm" onClick={clear} className="h-7 gap-1 px-2 text-[10px] text-muted-foreground hover:text-destructive">
@@ -130,7 +164,7 @@ export function AgentChat() {
 
         <main className="flex min-w-0 flex-1 flex-col">
           <div ref={scrollRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
+            <div className="mx-auto max-w-5xl space-y-6 px-4 py-6">
               {messages.length === 0 ? (
                 <EmptyState />
               ) : (
@@ -147,9 +181,11 @@ export function AgentChat() {
           <ChatInput />
         </main>
 
-        <aside className="hidden h-full w-[300px] shrink-0 overflow-hidden border-l border-border xl:block">
-          <AgentRuntimePanel />
-        </aside>
+        {!rightPanelCollapsed && (
+          <aside className="hidden h-full w-[300px] shrink-0 overflow-hidden border-l border-border xl:block">
+            <AgentRuntimePanel />
+          </aside>
+        )}
       </div>
 
       {/* Footer */}
