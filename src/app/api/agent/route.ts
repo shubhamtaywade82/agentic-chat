@@ -364,6 +364,11 @@ async function runViaNexum(
           send({ kind: "answer", iteration, content: "⚠️ Run cancelled." })
           break
         }
+        case "run.interrupted": {
+          const e = event as NexumRunEvent & { reason: string }
+          send({ kind: "answer", iteration, content: `⚠️ **Run Interrupted**: ${e.reason}` })
+          break
+        }
         // "run.started" and "model.used" have no matching TraceStep kind — nothing to render.
       }
     }
