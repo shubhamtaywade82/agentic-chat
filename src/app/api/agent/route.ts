@@ -6,7 +6,7 @@ import { acquireConnection } from "@/lib/mcp/pool"
 import { isMcpToolName } from "@/lib/mcp/types"
 import { buildOpenUISystemPrompt } from "@/lib/openui/prompt"
 import { shouldActivateOpenUI } from "@/lib/openui/detect"
-import { createNexumSession, nexumHostUrl, streamNexumRun, type NexumRunEvent } from "@/lib/nexum-client"
+import { createNexumSession, nexumHostUrl, streamNexumRun, type NexumRunEvent, type NexumRunOutput } from "@/lib/nexum-client"
 
 interface ChatMessage {
   role: "system" | "user" | "assistant"
@@ -351,8 +351,8 @@ async function runViaNexum(
           break
         }
         case "run.completed": {
-          const e = event as NexumRunEvent & { output: string }
-          send({ kind: "answer", iteration, content: e.output })
+          const e = event as NexumRunEvent & { output: NexumRunOutput }
+          send({ kind: "answer", iteration, content: e.output.content })
           break
         }
         case "run.failed": {

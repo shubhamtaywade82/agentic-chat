@@ -1,5 +1,11 @@
 export type OutputFormat = "markdown" | "openui" | "json" | "text";
 
+export interface NexumRunOutput {
+  format: OutputFormat;
+  content: string;
+  schemaVersion?: string;
+}
+
 export type RunStatus =
   | "queued"
   | "running"
@@ -26,9 +32,8 @@ export interface NexumRun {
   sessionId: string;
   goal: string;
   status: RunStatus;
-  output?: string;
+  output?: NexumRunOutput;
   error?: string;
-  outputFormat?: OutputFormat;
   startedAt: number;
   finishedAt?: number;
 }
@@ -60,6 +65,7 @@ export interface NexumCapabilities {
   version: string;
   protocolVersion: string;
   agents: string[];
+  outputFormats?: OutputFormat[];
   tools?: string[];
 }
 
