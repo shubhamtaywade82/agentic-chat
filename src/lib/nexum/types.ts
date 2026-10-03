@@ -93,6 +93,9 @@ export interface NexumModelInfo {
 export interface NexumMcpServerInfo {
   name: string;
   trust: "trusted" | "ask" | "untrusted";
+  /** `denied` means the server's trust policy refused it (for example `ask` with no recorded approval). */
+  status: "connected" | "failed" | "denied";
+  tools: number;
 }
 
 /** What the connected Nexum server can do; the client reads this instead of assuming. */

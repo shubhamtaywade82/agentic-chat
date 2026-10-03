@@ -105,8 +105,13 @@ export function AgentRuntimePanel() {
                 {capabilities.mcp.map((s) => (
                   <span
                     key={s.name}
-                    className="px-1.5 py-0.5 rounded font-mono text-[9px] bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30"
-                    title={`MCP server: ${s.name} (${s.trust})`}
+                    className={cn(
+                      "px-1.5 py-0.5 rounded font-mono text-[9px] border",
+                      s.status === "connected"
+                        ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/30"
+                        : "bg-muted/30 text-muted-foreground/60 border-border/60 line-through",
+                    )}
+                    title={`MCP server: ${s.name} · ${s.status} · ${s.tools} tools · trust ${s.trust}`}
                   >
                     mcp:{s.name}
                   </span>

@@ -90,7 +90,13 @@ export function NexumDialog({ trigger }: { trigger: React.ReactNode }) {
               />
             </TabsContent>
             <TabsContent value="mcp">
-              <List items={capabilities?.mcp.map((s) => ({ key: s.name, title: s.name, badges: [`trust: ${s.trust}`] }))} />
+              <List
+                items={capabilities?.mcp.map((s) => ({
+                  key: s.name,
+                  title: s.name,
+                  badges: [s.status, `${s.tools} tools`, `trust: ${s.trust}`],
+                }))}
+              />
             </TabsContent>
           </div>
         </Tabs>
