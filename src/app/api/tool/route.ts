@@ -1,69 +1,40 @@
 import { NextRequest, NextResponse } from "next/server"
-import { executeLiveTool } from "@/lib/live-tools"
-import type {
-  AgentConfig,
-  BinanceConfig,
-  CustomTool,
-  DhanConfig,
-} from "@/lib/agent-types"
-import { acquireConnection } from "@/lib/mcp/pool"
-import { isMcpToolName } from "@/lib/mcp/types"
+import { NexumClient, NexumHttpError, describeNexumError } from "@/lib/nexum"
+import { nexumHostUrl } from "@/lib/nexum-client"
 
 /**
- * Server-side tool execution endpoint for OpenUI-rendered components.
+ * Tool calls from OpenUI-rendered components (`Query(...)`, `@Run`), proxied
+ * to the chat's Nexum session. Nexum owns execution, credentials and policy,
+ * and only runs tools that opted in to direct calls from generated UI (see
+ * `uiInvocable` in /capabilities); everything else, and anything that changes
+ * state, must go through an agent run (e.g. `@ToAssistant`). This route stays server-side
+ * only so the Nexum token never reaches the browser.
  *
- * When an OpenUI Lang component calls `Query("binance_price", { symbol: "BTCUSDT" })`
- * or fires an `@Run` action, the client-side `toolProvider` (see
- * `src/lib/openui/tool-provider.ts`) POSTs the call here instead of
- * executing it in the browser. This keeps server-only credentials (Dhan
- * tokens, Binance API keys) and Node-only modules (`@shubhamtaywade82/dhanhq-ts`
- * needs `readline`) off the client.
- *
- * Body: `{ tool: string, args: Record<string, unknown>, config: AgentConfig }`
+ * Body: `{ tool: string, args?: Record<string, unknown>, nexumSessionId: string }`
  * Response: `{ ok: true, data: unknown } | { ok: false, error: string }`
- *
- * See docs/openui-integration.md §5.4 (Pattern D).
  */
 export async function POST(req: NextRequest) {
+  const body = (await req.json()) as { tool?: unknown; args?: Record<string, unknown>; nexumSessionId?: unknown }
+  if (typeof body.tool !== "string" || !body.tool) {
+    return NextResponse.json({ ok: false, error: "Missing `tool` field" }, { status: 400 })
+  }
+  if (typeof body.nexumSessionId !== "string" || !body.nexumSessionId) {
+    return NextResponse.json(
+      { ok: false, error: "This chat has no Nexum session yet; send a message first" },
+      { status: 400 },
+    )
+  }
+
+  const nexum = new NexumClient({ baseUrl: nexumHostUrl() })
   try {
-    const body = (await req.json()) as {
-      tool: string
-      args: Record<string, unknown>
-      config: Pick<AgentConfig, "customTools" | "dhan" | "binance" | "mcpServers">
-    }
-
-    if (!body.tool || typeof body.tool !== "string") {
-      return NextResponse.json(
-        { ok: false, error: "Missing `tool` field" },
-        { status: 400 }
-      )
-    }
-
-    const args = body.args ?? {}
-    const customTools: CustomTool[] = body.config?.customTools ?? []
-    const dhan: DhanConfig | undefined = body.config?.dhan
-    const binance: BinanceConfig | undefined = body.config?.binance
-
-    // MCP-prefixed tool names route through the pooled McpClientManager.
-    if (isMcpToolName(body.tool)) {
-      const mcpServers = body.config?.mcpServers ?? []
-      const conn = await acquireConnection(mcpServers)
-      try {
-        const r = await conn.manager.callTool(body.tool, args)
-        return NextResponse.json({ ok: true, data: r.data })
-      } finally {
-        conn.release()
-      }
-    }
-
-    // Built-in + custom tools go through the existing dispatcher.
-    const r = await executeLiveTool(body.tool, args, customTools, dhan, binance)
-    if (r.error) {
-      return NextResponse.json({ ok: false, error: r.error, data: r.data }, { status: 500 })
-    }
-    return NextResponse.json({ ok: true, data: r.data })
+    const result = await nexum.tools.invoke(body.nexumSessionId, body.tool, body.args ?? {})
+    if (!result.ok) return NextResponse.json({ ok: false, error: result.error?.message ?? `Tool ${body.tool} failed` })
+    return NextResponse.json({ ok: true, data: result.data })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 })
+    if (err instanceof NexumHttpError) {
+      return NextResponse.json({ ok: false, error: describeNexumError(err) }, { status: err.status })
+    }
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ ok: false, error: message }, { status: 502 })
   }
 }

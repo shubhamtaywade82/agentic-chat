@@ -1,5 +1,7 @@
 "use client"
 
+import { componentSpecs } from "@/lib/openui/spec"
+import { PRESENTATION_LABELS } from "@/lib/presentation"
 import { useState } from "react"
 import Link from "next/link"
 import {
@@ -18,13 +20,11 @@ import { OpenUIAnswerRenderer } from "@/components/agent-chat/openui-answer"
 import { OPENUI_PRESETS } from "./presets"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 export function OpenUIPlayground() {
   const config = useAgentStore((s) => s.config)
-  const updateConfig = useAgentStore((s) => s.updateConfig)
   const [selectedPresetId, setSelectedPresetId] = useState(OPENUI_PRESETS[0].id)
   const [code, setCode] = useState(OPENUI_PRESETS[0].code)
   const [copied, setCopied] = useState(false)
@@ -59,12 +59,6 @@ export function OpenUIPlayground() {
             </Link>
           </Button>
 
-          <Button asChild variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-xs">
-            <Link href="/dashboard">
-              <LineChart className="h-3.5 w-3.5 text-cyan-500" />
-              <span className="hidden sm:inline">Dashboard</span>
-            </Link>
-          </Button>
 
           <div className="h-4 w-px bg-border" />
 
@@ -88,15 +82,12 @@ export function OpenUIPlayground() {
 
         <div className="flex items-center gap-2">
           <div className="hidden items-center gap-2 rounded-lg border border-border bg-card/60 px-2.5 py-1 text-xs sm:flex">
-            <span className="text-[11px] text-muted-foreground">Chat Generative UI:</span>
-            <span className={`text-[11px] font-semibold ${config.openuiEnabled ? "text-emerald-500" : "text-muted-foreground"}`}>
-              {config.openuiEnabled ? "Enabled" : "Disabled"}
+            <span className="text-[11px] text-muted-foreground">Chat generated UI:</span>
+            <span
+              className={`text-[11px] font-semibold ${config.presentation !== "markdown" ? "text-emerald-500" : "text-muted-foreground"}`}
+            >
+              {PRESENTATION_LABELS[config.presentation].label}
             </span>
-            <Switch
-              checked={config.openuiEnabled === true}
-              onCheckedChange={(v) => updateConfig({ openuiEnabled: v })}
-              className="scale-75"
-            />
           </div>
 
           <Button asChild variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs">
@@ -146,7 +137,7 @@ export function OpenUIPlayground() {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               className="flex-1 resize-none font-mono text-xs leading-relaxed scroll-thin bg-card/40 border-border"
-              placeholder="Enter OpenUI Lang (e.g. Stack { BinancePriceCard(...) })"
+              placeholder={`Enter OpenUI Lang, e.g. root = Stack("md", [Metric("Open issues", "12")])`}
               spellCheck={false}
             />
             <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
@@ -157,13 +148,11 @@ export function OpenUIPlayground() {
 
           {/* Component Catalog summary */}
           <footer className="border-t border-border bg-card/40 p-2.5">
-            <p className="text-[10px] font-medium text-muted-foreground mb-1.5">Domain Component Library (11 Registered)</p>
+            <p className="text-[10px] font-medium text-muted-foreground mb-1.5">
+              Component library ({Object.keys(componentSpecs).length} registered)
+            </p>
             <div className="flex flex-wrap gap-1">
-              {[
-                "Stack", "Text", "BinancePriceCard", "OrderBookTable",
-                "TradeSetupCard", "FundingRateCard", "RiskCalculatorCard",
-                "StatBlock", "ActionButton", "HtmlArtifact", "MarkdownFallback",
-              ].map((name) => (
+              {Object.keys(componentSpecs).map((name) => (
                 <Badge key={name} variant="secondary" className="font-mono text-[9px] py-0 px-1.5">
                   {name}
                 </Badge>
@@ -189,7 +178,6 @@ export function OpenUIPlayground() {
               <OpenUIAnswerRenderer
                 content={code}
                 isStreaming={false}
-                mcpServerConfig={config.mcpServers || []}
               />
             </div>
           </div>

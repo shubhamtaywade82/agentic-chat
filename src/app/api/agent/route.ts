@@ -1,392 +1,82 @@
 import { NextRequest } from "next/server"
-import { executeLiveTool, getToolSystemPrompt } from "@/lib/live-tools"
-import { formatMemoriesForPrompt } from "@/lib/memory-engine"
-import { DEFAULT_PROVIDER_URLS, type AgentConfig, type CustomTool } from "@/lib/agent-types"
-import { acquireConnection } from "@/lib/mcp/pool"
-import { isMcpToolName } from "@/lib/mcp/types"
-import { buildOpenUISystemPrompt } from "@/lib/openui/prompt"
-import { shouldActivateOpenUI } from "@/lib/openui/detect"
-import { createNexumSession, nexumHostUrl, streamNexumRun, type NexumRunEvent } from "@/lib/nexum-client"
+import { buildNexumOpenUIOffer } from "@/lib/openui/prompt"
+import { NexumClient, NexumHttpError, type CreateRunParams, type PresentationMode } from "@/lib/nexum"
+import { createNexumSession, nexumHostUrl } from "@/lib/nexum-client"
+import { newTurnState, translateNexumEvent, type NexumEvent } from "@/lib/nexum/wire"
 
-interface ChatMessage {
-  role: "system" | "user" | "assistant"
-  content: string
+type Send = (data: Record<string, unknown>) => void
+
+/**
+ * Starts the turn's run, or, when the chat's session already has one in
+ * progress (a second tab, or a cancelled run still winding down), follows
+ * that run instead and says so. The new message is not sent in that case.
+ */
+async function openRun(client: NexumClient, sessionId: string, params: CreateRunParams, send: Send): Promise<string> {
+  try {
+    return (await client.runs.create(sessionId, params)).id
+  } catch (err) {
+    const activeRunId = activeRunOfConflict(err)
+    if (!activeRunId) throw err
+    send({
+      kind: "thinking",
+      iteration: 1,
+      title: "A run is already active in this chat",
+      reasoning: "Your message was not sent. Showing the run in progress; send it again once it finishes.",
+    })
+    return activeRunId
+  }
 }
 
-const KNOWN_PREFIXES = ["binance_", "futures_", "dhan_", "prop_", "mcp_"]
-const KNOWN_EXACT = ["calculator", "weather_api", "weather", "web_search", "search", "code_interpreter"]
-
-const TOOL_ALIASES: Record<string, string> = {
-  propscan: "prop_scan_setups",
-  propscansetups: "prop_scan_setups",
-  scan_setups: "prop_scan_setups",
-  scansetups: "prop_scan_setups",
-  scansetup: "prop_scan_setups",
-  propeval: "prop_evaluate_pair",
-  propevaluatepair: "prop_evaluate_pair",
-  evaluatesetup: "prop_evaluate_pair",
-  eval_pair: "prop_evaluate_pair",
-  proprisk: "prop_risk_calculator",
-  propriskcalculator: "prop_risk_calculator",
-  riskcalc: "prop_risk_calculator",
-  positionsize: "prop_risk_calculator",
-  binance_price: "binance_price",
-  binanceprice: "binance_price",
-  price: "binance_price",
-  binance: "binance_price",
-  ticker: "binance_24hr_ticker",
-  binance_ticker: "binance_24hr_ticker",
-  stats: "binance_24hr_ticker",
-  kline: "binance_klines",
-  klines: "binance_klines",
-  candle: "binance_klines",
-  candles: "binance_klines",
-  orderbook: "binance_order_book",
-  order_book: "binance_order_book",
-  depth: "binance_order_book",
-  funding_rate: "binance_funding_rate",
-  funding: "binance_funding_rate",
-  open_interest: "binance_open_interest",
-  long_short_ratio: "binance_long_short_ratio",
-  weather: "weather_api",
-  weather_api: "weather_api",
-  calc: "calculator",
-  calculator: "calculator",
-  math: "calculator",
-  search: "web_search",
-  web_search: "web_search",
-  code: "code_interpreter",
-  code_interpreter: "code_interpreter",
-}
-
-function normalizeToolName(name: string, customTools: CustomTool[] = []): string | null {
-  const norm = name.toLowerCase().replace(/[^a-z0-9_]/g, "")
-  if (KNOWN_EXACT.includes(norm)) return norm
-  if (KNOWN_PREFIXES.some((p) => norm.startsWith(p))) return norm
-  const matchedCustom = customTools.find((c) => c.name.toLowerCase() === norm)
-  if (matchedCustom) return matchedCustom.name
-  return TOOL_ALIASES[norm] || null
-}
-
-function inferToolFromContext(text: string, args: Record<string, unknown>, customTools: CustomTool[] = []): string | null {
-  for (const c of customTools) {
-    if (new RegExp(`\\b${c.name}\\b`, "i").test(text)) return c.name
-  }
-  const known = [
-    "prop_scan_setups", "prop_evaluate_pair", "prop_risk_calculator",
-    "binance_price", "binance_24hr_ticker", "binance_klines", "binance_order_book",
-    "binance_funding_rate", "binance_open_interest", "binance_long_short_ratio",
-    "dhan_market_summary", "dhan_ltp", "dhan_quote", "dhan_holdings", "dhan_positions", "dhan_funds",
-    "calculator", "weather_api", "web_search", "code_interpreter"
-  ]
-  for (const k of known) {
-    if (new RegExp(`\\b${k}\\b`, "i").test(text)) return k
-  }
-  if (args.symbol || args.ticker) return "binance_price"
-  if (args.underlyingSymbol) return "dhan_market_summary"
-  if (args.securityId) return "dhan_ltp"
-  if (args.location || args.city) return "weather_api"
-  if (args.expression) return "calculator"
-  if (args.query) return "web_search"
-  if (args.code) return "code_interpreter"
-  return null
-}
-
-function buildToolArgs(toolName: string, val: string): Record<string, unknown> {
-  if (toolName.includes("binance")) return { symbol: val }
-  if (toolName.includes("dhan_market_summary")) return { underlyingSymbol: val }
-  if (toolName.includes("dhan")) return { securityId: val }
-  if (toolName.includes("weather")) return { location: val }
-  if (toolName.includes("calc")) return { expression: val }
-  if (toolName.includes("search")) return { query: val }
-  if (toolName.includes("code")) return { code: val }
-  return { input: val }
-}
-
-// Prune history to prevent exceeding model context window while retaining system prompt and latest user query
-function pruneConversation(messages: ChatMessage[], maxChars = 14000): ChatMessage[] {
-  if (messages.length <= 2) return messages
-  const system = messages[0]?.role === "system" ? messages[0] : null
-  const latestUser = messages[messages.length - 1]
-  const history = messages.slice(system ? 1 : 0, -1)
-
-  let totalChars = (system?.content.length || 0) + (latestUser?.content.length || 0)
-  const kept: ChatMessage[] = []
-
-  for (let i = history.length - 1; i >= 0; i--) {
-    const len = history[i].content.length
-    if (totalChars + len > maxChars) break
-    totalChars += len
-    kept.unshift(history[i])
-  }
-
-  return system ? [system, ...kept, latestUser] : [...kept, latestUser]
-}
-
-// Call LLM endpoint (Ollama, OpenAI, Groq, Custom) using chat completions protocol
-async function callLlm(
-  messages: ChatMessage[],
-  config: AgentConfig
-): Promise<{ text: string; tokensIn?: number; tokensOut?: number }> {
-  const provider = config.provider
-  let baseUrl = config.apiBaseUrl || DEFAULT_PROVIDER_URLS[provider] || "http://localhost:11434"
-  if (provider === "ollama_cloud" && baseUrl.includes("api.ollama.com")) {
-    baseUrl = baseUrl.replace("api.ollama.com", "ollama.com")
-  }
-  if (provider === "ollama_local" || provider === "ollama_cloud") {
-    if (!baseUrl.includes("/v1")) {
-      baseUrl = `${baseUrl.replace(/\/$/, "")}/v1`
-    }
-  }
-
-  const endpoint = `${baseUrl.replace(/\/$/, "")}/chat/completions`
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (config.apiKey) {
-    headers["Authorization"] = `Bearer ${config.apiKey}`
-  }
-
-  const payload: Record<string, unknown> = {
-    model: config.modelId,
-    messages: pruneConversation(messages),
-    temperature: config.temperature,
-    max_tokens: config.maxTokens,
-    stream: false,
-  }
-
-  // Set num_ctx to prevent local Ollama from defaulting to 4096 tokens and erroring out
-  if (provider === "ollama_local" || provider === "ollama_cloud") {
-    payload.options = {
-      num_ctx: 16384,
-    }
-  }
-
-  const res = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(payload) })
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "")
-    if (res.status === 401) {
-      throw new Error(
-        `LLM provider (${provider}) returned 401 Unauthorized. Remote cloud providers require an API key — please add your key in Agent Settings (⚙️), or switch to 'Ollama (Local)' to run locally with zero API keys.`
-      )
-    }
-    throw new Error(`LLM provider (${provider}) returned status ${res.status}: ${errText.slice(0, 180)}`)
-  }
-
-  const json = await res.json()
-  const rawText = json.choices?.[0]?.message?.content || ""
-  const tokensIn = json.usage?.prompt_tokens
-  const tokensOut = json.usage?.completion_tokens
-
-  // ── Gemma 4 thinking-channel stripping ────────────────────────────
-  // Gemma 4 (e.g. gemma4:26b, gemma4:31b on Ollama Cloud) emits its
-  // internal reasoning wrapped in `<|channel|>thought\n…\n<channel|>`
-  // tags — even when thinking is disabled, the model emits an empty
-  // thought block. We strip these because:
-  //
-  //   1. The ReAct loop's parser (parseAction / parsePlan / extractFinalAnswer)
-  //      matches on `Thought:` / `Action:` / `Final Answer:` plain text —
-  //      `<|channel|>` tags would leak into the answer bubble.
-  //   2. OpenUI Lang generation: the `<Renderer>` would see the thought
-  //      block as malformed OpenUI Lang and fall back to Markdown.
-  //   3. Multi-turn conversations: Gemma 4's best-practices doc says
-  //      historical turns must contain only the final response, not
-  //      thoughts — so we'd corrupt the conversation history otherwise.
-  //
-  // This is a no-op for non-Gemma providers (the regex doesn't match).
-  // See: https://ollama.com/library/gemma4 (Best Practices §2)
-  const text = rawText
-    .replace(/<\|channel\|>thought[\s\S]*?<\|channel\|>/g, "")
-    .replace(/<\|channel\|>thought[\s\S]*?$/g, "") // unclosed (mid-stream)
-    .replace(/<\|[^|]*\|>/g, "") // any stray control tokens
-    .trim()
-
-  return { text, tokensIn, tokensOut }
-}
-
-// Parses tool call action and action input from various LLM response formats
-function parseAction(text: string, customTools: CustomTool[] = []): { toolName: string; args: Record<string, unknown> } | null {
-  // 1. JSON object directly in Action line (e.g. Action: {"tool": "binance_price", "symbol": "SOLUSDT"} or Action: {"symbol": "SOLUSDT"})
-  const jsonActionMatch = text.match(/(?:Action|Tool|Tool Call):\s*(\{[\s\S]*?\})/i) || text.match(/(?:Action|Tool|Tool Call):\s*```(?:json)?\s*(\{[\s\S]*?\})\s*```/i)
-  if (jsonActionMatch) {
-    try {
-      const obj = JSON.parse(jsonActionMatch[1])
-      let toolName = obj.tool || obj.name || obj.action || obj.tool_name || ""
-      const { tool: _t, name: _n, action: _a, tool_name: _tn, ...rest } = obj
-      const rawArgs = Object.keys(rest).length > 0 ? (rest.args || rest.parameters || rest.input || rest) : {}
-      const args = typeof rawArgs === "object" && rawArgs !== null ? rawArgs : { input: rawArgs }
-
-      if (!toolName) {
-        toolName = inferToolFromContext(text, args, customTools) || ""
-      }
-
-      const normalized = normalizeToolName(toolName, customTools)
-      if (normalized) {
-        return { toolName: normalized, args }
-      }
-    } catch {
-      // Continue to next parser
-    }
-  }
-
-  // 2. Standard or function syntax (e.g. Action: binance_price({"symbol": "SOLUSDT"}) or Action: binance_price)
-  const stdMatch = text.match(/(?:Action|Tool|Tool Call):\s*[`\[]?([a-zA-Z0-9_\-]+)[`\]]?(?:[\s\(]+(\{[\s\S]*?\})[\)]?)?/i)
-  if (stdMatch) {
-    const rawTool = stdMatch[1].trim()
-    const normalized = normalizeToolName(rawTool, customTools)
-    if (normalized) {
-      let args: Record<string, unknown> = {}
-      if (stdMatch[2]) {
-        try {
-          args = JSON.parse(stdMatch[2])
-        } catch {
-          args = { input: stdMatch[2].replace(/^["'`]|["'`]$/g, "") }
-        }
-      } else {
-        const inputMatch = text.match(/Action Input:\s*(\{[\s\S]*?\}|\[[\s\S]*?\]|".*?"|[^\n]+)/i)
-        if (inputMatch) {
-          const raw = inputMatch[1].trim()
-          try {
-            const parsed = JSON.parse(raw)
-            args = typeof parsed === "object" && parsed !== null ? parsed : { input: parsed }
-          } catch {
-            args = { input: raw.replace(/^["'`]|["'`]$/g, "") }
-          }
-        }
-      }
-      return { toolName: normalized, args }
-    }
-  }
-
-  // Do not perform fuzzy natural language matching on finished answers or structured tables
-  if (/Final Answer:/i.test(text) || text.includes("|") || text.length > 400) {
+function activeRunOfConflict(err: unknown): string | null {
+  if (!(err instanceof NexumHttpError) || err.status !== 409) return null
+  try {
+    const body = JSON.parse(err.body ?? "") as { error?: string; runId?: unknown }
+    return body.error === "run_in_progress" && typeof body.runId === "string" ? body.runId : null
+  } catch {
     return null
   }
-
-  // 3. Fallback for explicit tool execution intents in thoughts with arguments
-  const natMatch = text.match(/\b(?:call|calling|fetch|fetching|run|execute)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)(?:[\s\S]*?(?:symbol|ticker|underlyingSymbol|query|location|code|securityId|expression)["\s:=]+([a-zA-Z0-9_\.\-]+))?/i)
-  if (natMatch) {
-    const rawTool = natMatch[1].toLowerCase().replace(/[^a-z0-9_]/g, "")
-    const normalized = normalizeToolName(rawTool, customTools)
-    const val = natMatch[2]?.replace(/^["'`]|["'`]$/g, "")
-    if (normalized && val) {
-      return { toolName: normalized, args: buildToolArgs(normalized, val) }
-    }
-  }
-
-  return null
-}
-
-// Parses high-level plan items if present in the LLM text
-function parsePlan(text: string): string[] | null {
-  const planMatch = text.match(/Plan:\s*([\s\S]*?)(?=Thought:|Action:|$)/i)
-  if (!planMatch) return null
-  const lines = planMatch[1].split("\n").map((l) => l.replace(/^[-*\d.\s]+/, "").trim()).filter(Boolean)
-  return lines.length > 0 ? lines : null
-}
-
-// Extracts clean final answer preserving rich markdown formatting
-function extractFinalAnswer(content: string): string {
-  const answerMatch = content.match(/Final Answer:\s*([\s\S]*)$/i)
-  if (answerMatch) return answerMatch[1].trim()
-
-  const withoutThought = content.replace(/^Thought:\s*[\s\S]*?(?=\n\n(?:```|[#*-]|<table|\[|{))/i, "").trim()
-  if (withoutThought && withoutThought !== content) return withoutThought
-
-  return content.replace(/^Thought:[\s\S]*?(?=\n\s*(?:Final Answer:|$))/i, "").replace(/^Final Answer:\s*/i, "").trim() || content
 }
 
 /**
- * Runs one turn through an external `nexum serve` host instead of the
- * in-process ReAct loop below, translating Nexum's NexumRunEvent stream
- * into the exact same `{kind, iteration, ...}` wire events this route has
- * always emitted — src/store/agent-store.ts (the only consumer) needs no
- * changes either way. See src/lib/nexum-client.ts for the scope/limits of
- * this first integration slice (no history/tool-config forwarding yet).
+ * Runs one turn through Nexum and relays its events as wire events (see
+ * src/lib/nexum/wire.ts). When `signal` aborts, the browser has gone away —
+ * nobody can answer an approval any more — so the Nexum run is cancelled
+ * rather than left running or blocked.
  */
 async function runViaNexum(
-  send: (data: Record<string, unknown>) => void,
+  send: Send,
   baseUrl: string,
   sessionId: string,
-  query: string,
+  params: CreateRunParams,
+  signal: AbortSignal,
 ): Promise<void> {
-  let iteration = 1
-  const toolIteration = new Map<string, number>()
-
+  const client = new NexumClient({ baseUrl })
+  const state = newTurnState()
   try {
-    for await (const event of streamNexumRun(baseUrl, sessionId, query)) {
-      switch (event.type) {
-        case "plan.updated": {
-          const e = event as NexumRunEvent & { goal: string; steps: { id: string; text: string; done: boolean }[] }
-          send({ kind: "plan", iteration, goal: e.goal, steps: e.steps })
-          break
-        }
-        case "thought": {
-          const e = event as NexumRunEvent & { text: string }
-          send({
-            kind: "thinking",
-            iteration,
-            title: iteration === 1 ? "Analyzing user query & plan" : `Iterative reasoning (cycle ${iteration})`,
-            reasoning: e.text,
-          })
-          break
-        }
-        case "tool.started": {
-          const e = event as NexumRunEvent & { callId: string; name: string; args: Record<string, unknown> }
-          toolIteration.set(e.callId, iteration)
-          send({
-            kind: "tool_call",
-            iteration,
-            toolName: e.name,
-            description: `Calling ${e.name} with parameters`,
-            args: e.args,
-          })
-          break
-        }
-        case "tool.completed": {
-          const e = event as NexumRunEvent & { callId: string; name: string; result: Record<string, unknown> }
-          const it = toolIteration.get(e.callId) ?? iteration
-          const summary =
-            typeof e.result?.summary === "string" ? (e.result.summary as string) : JSON.stringify(e.result).slice(0, 200)
-          send({ kind: "observation", iteration: it, source: e.name, summary, data: e.result })
-          iteration = it + 1
-          break
-        }
-        case "run.completed": {
-          const e = event as NexumRunEvent & { output: string }
-          send({ kind: "answer", iteration, content: e.output })
-          break
-        }
-        case "run.failed": {
-          const e = event as NexumRunEvent & { error: string }
-          send({ kind: "answer", iteration, content: `⚠️ **Agent Error**: ${e.error}` })
-          break
-        }
-        case "run.cancelled": {
-          send({ kind: "answer", iteration, content: "⚠️ Run cancelled." })
-          break
-        }
-        case "run.interrupted": {
-          const e = event as NexumRunEvent & { reason: string }
-          send({ kind: "answer", iteration, content: `⚠️ **Run Interrupted**: ${e.reason}` })
-          break
-        }
-        // "run.started" and "model.used" have no matching TraceStep kind — nothing to render.
-      }
+    const runId = await openRun(client, sessionId, params, send)
+    const cancelRun = () => void client.runs.cancel(runId).catch(() => {})
+    if (signal.aborted) cancelRun()
+    else signal.addEventListener("abort", cancelRun, { once: true })
+
+    for await (const envelope of client.events.stream(runId, { signal })) {
+      const event = (envelope.payload ?? envelope) as NexumEvent
+      if (!event.runId) event.runId = envelope.runId
+      for (const wireEvent of translateNexumEvent(event, state)) send(wireEvent)
     }
   } catch (err: unknown) {
+    if (signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
-    send({ kind: "answer", iteration, content: `⚠️ **Agent Error** (Nexum host): ${message}` })
+    send({ kind: "answer", iteration: state.iteration, content: `⚠️ **Agent Error** (Nexum host): ${message}` })
   }
 }
 
 export async function POST(req: NextRequest) {
-  const { query, history = [], config, customTools = [], nexumSessionId } = (await req.json()) as {
+  const { query, presentation = "auto", nexumSessionId } = (await req.json()) as {
     query: string
-    history?: { role: "user" | "assistant"; content: string }[]
-    config: AgentConfig
-    customTools?: CustomTool[]
-    /** A Nexum host session from a prior turn in this chat, if one exists —
-     * reused instead of minting a fresh Nexum session per message so the
-     * conversation is continuous on the Nexum side too. */
+    /** How much generated UI the user wants; Nexum decides each answer's actual format. */
+    presentation?: PresentationMode
+    /** The Nexum session from a prior turn in this chat, if one exists; reused so
+     * the conversation stays continuous on the Nexum side. */
     nexumSessionId?: string
   }
 
@@ -395,227 +85,45 @@ export async function POST(req: NextRequest) {
   // persists it onto the ChatSession for the next turn to reuse.
   const nexumUrl = nexumHostUrl()
   let resolvedNexumSessionId: string | null = null
-  if (nexumUrl) {
-    try {
-      resolvedNexumSessionId = nexumSessionId || (await createNexumSession(nexumUrl))
-    } catch {
-      // Surfaced as a normal run.failed-shaped error inside the stream below.
-    }
+  try {
+    resolvedNexumSessionId = nexumSessionId || (await createNexumSession(nexumUrl))
+  } catch {
+    // Surfaced as an answer-shaped error inside the stream below.
   }
 
+  // Aborts when the browser disconnects (Stop, refresh, closed tab); see runViaNexum.
+  const disconnected = new AbortController()
+  req.signal.addEventListener("abort", () => disconnected.abort())
+
   const encoder = new TextEncoder()
+  let closed = false
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (data: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+      const send: Send = (data) => {
+        if (!closed) controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
       }
 
-      // ── Nexum host adapter (Phase 4/5) ────────────────────────────────
-      // When NEXUM_HOST_URL is configured, delegate the whole turn to an
-      // external `nexum serve` process instead of running the in-process
-      // ReAct loop below. Unset by default — existing behavior is
-      // unchanged until this env var is explicitly opted into.
-      if (nexumUrl) {
-        if (resolvedNexumSessionId) {
-          await runViaNexum(send, nexumUrl, resolvedNexumSessionId, query)
-        } else {
-          send({ kind: "answer", iteration: 1, content: "⚠️ **Agent Error** (Nexum host): could not create a session — is `nexum serve` running?" })
+      if (resolvedNexumSessionId) {
+        // Nexum decides whether UI fits the answer and labels the format; the client only says what
+        // it can render and how much UI the user wants.
+        const runParams: CreateRunParams = {
+          goal: query,
+          interactive: true,
+          presentation: { mode: presentation, ...(presentation === "markdown" ? {} : { openui: buildNexumOpenUIOffer() }) },
         }
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"))
-        controller.close()
-        return
+        await runViaNexum(send, nexumUrl, resolvedNexumSessionId, runParams, disconnected.signal)
+      } else {
+        send({ kind: "answer", iteration: 1, content: `⚠️ **Agent Error**: could not reach Nexum at ${nexumUrl} — is \`nexum serve\` running?` })
       }
-
-      // ── MCP server bootstrap (pooled) ────────────────────────────────
-      // Acquire a long-lived MCP connection from the process-global pool.
-      // The pool keeps each server's McpClientManager alive across requests
-      // for up to 10 min of idle time, so the spawn cost (~500ms–2s per
-      // server) is paid only on the very first request after server boot
-      // or after a connection expires. Subsequent requests reuse the
-      // pooled connection in ~0ms (plus a 5s ping health-check).
-      //
-      // The connection MUST be released via conn.release() when the
-      // request is done — otherwise the refcount never hits 0 and the
-      // sweeper can't evict idle entries.
-      const mcpConn = await acquireConnection(config.mcpServers || [])
-      const mcpTools = mcpConn.tools
-      const mcpManager = mcpConn.manager
-
-      try {
-        const memoryBlock = formatMemoriesForPrompt(config.memories, query)
-        // OpenUI Pattern B: when openuiEnabled is on AND the query asks for
-        // market data / visual components (intent-based), swap the system
-        // prompt for the OpenUI-augmented one. For general programming or text
-        // queries, keep standard natural Markdown for speed and natural prose.
-        const activateOpenUI = config.openuiEnabled && shouldActivateOpenUI(query)
-        const systemPrompt = activateOpenUI
-          ? buildOpenUISystemPrompt({
-              baseSystemPrompt: config.systemPrompt,
-              memories: config.memories,
-              query,
-              enabledTools: config.enabledTools,
-              customTools,
-              mcpTools,
-            })
-          : `${config.systemPrompt}${memoryBlock}\n\n${getToolSystemPrompt(config.enabledTools, customTools, mcpTools)}`
-        const conversation: ChatMessage[] = [
-          { role: "system", content: systemPrompt },
-          ...history.map((h) => ({ role: h.role, content: h.content })),
-          { role: "user", content: query },
-        ]
-
-        let currentIteration = 1
-        const maxIters = config.maxIterations || 10
-        let finalAnswerFound = false
-        let planDetected = false
-        let planRequiresTool = false
-        let toolCallMade = false
-
-        while (currentIteration <= maxIters && !finalAnswerFound) {
-          const llmRes = await callLlm(conversation, config)
-          const content = llmRes.text
-
-          // Step 1: Detect and emit Plan if in first iteration
-          if (currentIteration === 1) {
-            const planSteps = parsePlan(content)
-            if (planSteps) {
-              planDetected = true
-              planRequiresTool = planSteps.some((step) => {
-                const s = step.toLowerCase()
-                return (
-                  Object.keys(config.enabledTools || {}).some((t) => config.enabledTools[t] && s.includes(t.toLowerCase())) ||
-                  customTools.some((t) => s.includes(t.name.toLowerCase())) ||
-                  mcpTools.some((m) => s.includes(m.fullName.toLowerCase())) ||
-                  /\b(fetch|call tool|use tool|execute tool|lookup live|live data|order book)\b/i.test(s)
-                )
-              })
-              send({
-                kind: "plan",
-                iteration: currentIteration,
-                goal: `Resolve request: "${query}"`,
-                steps: planSteps.map((text, i) => ({ id: `step_${i + 1}`, text, done: false })),
-              })
-            }
-          }
-
-          // Step 2: Check for Action, and extract reasoning/thought
-          const action = parseAction(content, customTools)
-          const thoughtMatch = content.match(/Thought:\s*([\s\S]*?)(?=Action:|Final Answer:|$)/i)
-          const hasFinalAnswerLabel = /Final Answer:/i.test(content)
-          // Only synthesize a thought from the raw content when the model actually left something
-          // preceding an Action or Final Answer — otherwise content IS the final answer, and showing
-          // it again as "thinking" just duplicates the same text in two bubbles.
-          const thoughtText = thoughtMatch
-            ? thoughtMatch[1].trim()
-            : action || hasFinalAnswerLabel
-              ? content.replace(/Final Answer:[\s\S]*/i, "").trim()
-              : ""
-
-          if (thoughtText) {
-            send({
-              kind: "thinking",
-              iteration: currentIteration,
-              title: currentIteration === 1 ? "Analyzing user query & plan" : `Iterative reasoning (cycle ${currentIteration})`,
-              reasoning: thoughtText,
-              tokensIn: llmRes.tokensIn || 40,
-              tokensOut: llmRes.tokensOut || 60,
-            })
-          }
-
-          // Step 3: Check for Action vs Final Answer
-
-          if (action) {
-            send({
-              kind: "tool_call",
-              iteration: currentIteration,
-              toolName: action.toolName,
-              description: `Calling ${action.toolName} with parameters`,
-              args: action.args,
-            })
-
-            toolCallMade = true
-
-            // Route to MCP manager if the tool name uses the mcp__ prefix,
-            // otherwise dispatch to the built-in live-tools.
-            const toolResult = isMcpToolName(action.toolName)
-              ? await mcpManager.callTool(action.toolName, action.args)
-              : await executeLiveTool(action.toolName, action.args, customTools, config.dhan, config.binance)
-
-            send({
-              kind: "observation",
-              iteration: currentIteration,
-              source: action.toolName,
-              summary: toolResult.summary,
-              data: toolResult.data,
-            })
-
-            // Feed observation back into conversation for next iteration
-            conversation.push({ role: "assistant", content })
-            conversation.push({
-              role: "user",
-              content: `Observation from ${action.toolName}:\n${JSON.stringify(toolResult.data, null, 2)}\n\nNow review the observation above and produce your next Thought/Action, or give your Final Answer in rich Markdown.`,
-            })
-
-            currentIteration += 1
-          } else {
-            const finalAnswer = extractFinalAnswer(content)
-            const hasSubstantialAnswer =
-              finalAnswer.length > 80 || /\n(?:```|[#*-]|<table|\|)/.test(finalAnswer)
-            const isOnlyPlanOrThought =
-              !finalAnswer ||
-              (!hasSubstantialAnswer &&
-                (content.trim().startsWith("Plan:") || content.trim().startsWith("Thought:")) &&
-                !/Final Answer:/i.test(content))
-            // Only consider an answer premature if the plan explicitly intended to fetch external tool data
-            const answerPrematureVsPlan = planRequiresTool && !toolCallMade
-
-            if ((isOnlyPlanOrThought || answerPrematureVsPlan) && currentIteration < maxIters) {
-              conversation.push({ role: "assistant", content })
-              conversation.push({
-                role: "user",
-                content: answerPrematureVsPlan
-                  ? "Your plan requires live data you haven't fetched yet. Emit an Action to call the needed tool now — do not give a Final Answer until you have real tool observations to base it on."
-                  : "Observation reviewed. Please present your complete Final Answer in rich Markdown to the user.",
-              })
-              currentIteration += 1
-            } else {
-              send({
-                kind: "answer",
-                iteration: currentIteration,
-                content: finalAnswer || content || "The model returned an empty response after multiple attempts. Try again or switch models.",
-                openuiActive: activateOpenUI,
-              })
-              finalAnswerFound = true
-            }
-          }
-        }
-
-        if (!finalAnswerFound) {
-          send({
-            kind: "answer",
-            iteration: currentIteration,
-            content: "The agent completed maximum allowed iterations. Please see the trace steps above.",
-          })
-        }
-
+      if (!closed) {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))
         controller.close()
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err)
-        send({
-          kind: "answer",
-          iteration: 1,
-          content: `⚠️ **Agent Error**: ${errorMsg}`,
-        })
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"))
-        controller.close()
-      } finally {
-        // Release the pooled MCP connection. This decrements the refcount
-        // and updates lastUsedAt. The connection itself stays in the pool
-        // for future requests until its TTL expires (10 min idle) or the
-        // config changes (hash mismatch on next acquire).
-        mcpConn.release()
+        closed = true
       }
+    },
+    cancel() {
+      closed = true
+      disconnected.abort()
     },
   })
 

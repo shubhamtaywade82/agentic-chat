@@ -8,8 +8,8 @@ import { UserMessageView } from "./user-message"
 import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
-import { AgentConfigDialog } from "./agent-config-dialog"
-import { LiveTickerBar } from "./live-ticker-bar"
+import { NexumDialog } from "./nexum-dialog"
+import { PRESENTATION_LABELS, PRESENTATION_MODES, serverSupportsOpenUI } from "@/lib/presentation"
 import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -29,6 +29,9 @@ export function AgentChat() {
   const updateConfig = useAgentStore((s) => s.updateConfig)
   const clear = useAgentStore((s) => s.clear)
   const hydrateFromStorage = useAgentStore((s) => s.hydrateFromStorage)
+  const loadCapabilities = useAgentStore((s) => s.loadCapabilities)
+  const capabilities = useAgentStore((s) => s.capabilities)
+  const openuiSupported = useAgentStore((s) => serverSupportsOpenUI(s.capabilities))
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
   const rightPanelCollapsed = useAgentStore((s) => s.rightPanelCollapsed)
@@ -36,9 +39,15 @@ export function AgentChat() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
 
+  const cyclePresentation = () => {
+    const modes = PRESENTATION_MODES.filter((m) => m !== "openui" || openuiSupported)
+    updateConfig({ presentation: modes[(modes.indexOf(config.presentation) + 1) % modes.length] })
+  }
+
   useEffect(() => {
     hydrateFromStorage()
-  }, [hydrateFromStorage])
+    void loadCapabilities()
+  }, [hydrateFromStorage, loadCapabilities])
 
   // auto-scroll to bottom on new content
   useEffect(() => {
@@ -46,9 +55,6 @@ export function AgentChat() {
     if (!el) return
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [messages, activeMessageId, isRunning])
-
-  const activeProvider = isMounted ? config.provider : DEFAULT_CONFIG.provider
-  const activeModel = isMounted ? config.modelId : DEFAULT_CONFIG.modelId
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -88,12 +94,6 @@ export function AgentChat() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
-            <Link href="/dashboard">
-              <LineChart className="h-3 w-3 text-muted-foreground" />
-              <span className="hidden sm:inline">Dashboard</span>
-            </Link>
-          </Button>
 
           <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
             <Link href="/openui">
@@ -105,18 +105,18 @@ export function AgentChat() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => updateConfig({ openuiEnabled: !config.openuiEnabled })}
+            onClick={cyclePresentation}
             className={cn(
               "h-7 gap-1.5 px-2 text-xs font-mono transition",
-              config.openuiEnabled
+              config.presentation !== "markdown"
                 ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold"
                 : "text-muted-foreground hover:text-foreground"
             )}
-            title={config.openuiEnabled ? "OpenUI Generative UI: ON (click to disable)" : "OpenUI Generative UI: OFF (click to enable)"}
+            title={`Generated UI: ${PRESENTATION_LABELS[config.presentation].description} Click to change.`}
           >
             <LayoutDashboard className="h-3 w-3" />
-            <span className="hidden md:inline">OpenUI:</span>
-            <span>{config.openuiEnabled ? "ON" : "OFF"}</span>
+            <span className="hidden md:inline">UI:</span>
+            <span>{PRESENTATION_LABELS[config.presentation].label}</span>
           </Button>
 
           <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
@@ -124,12 +124,11 @@ export function AgentChat() {
           </Badge>
 
           {/* Settings Backdrop Trigger in Header */}
-          <AgentConfigDialog
+          <NexumDialog
             trigger={
               <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs font-mono">
                 <Settings className="h-3 w-3 text-muted-foreground" />
-                <span className="hidden sm:inline">{activeProvider.replace(/_/g, " ")}:</span>
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{activeModel}</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">Nexum</span>
               </Button>
             }
           />
@@ -152,7 +151,6 @@ export function AgentChat() {
       </header>
 
       {/* Live WebSocket Ticker Stream Bar */}
-      <LiveTickerBar />
 
       {/* Body */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -192,9 +190,9 @@ export function AgentChat() {
       <footer className="flex h-7 shrink-0 items-center justify-between border-t border-border bg-background px-4 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Agent runtime online · Connected to {activeProvider.replace(/_/g, " ")}
+          {capabilities ? "Connected to Nexum" : "Nexum not connected"}
         </span>
-        <span className="font-mono">ReAct = Reason + Act + Observe · loop until answer</span>
+        <span className="font-mono">Plan · act · observe · answer</span>
       </footer>
     </div>
   )

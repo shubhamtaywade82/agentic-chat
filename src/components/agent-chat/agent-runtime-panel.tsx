@@ -2,14 +2,13 @@
 
 import { useAgentStore } from "@/store/agent-store"
 import { ReactLoopViz, derivePhase } from "./react-loop-viz"
-import { Activity, Coins, Brain, MessageSquare, PanelRightClose } from "lucide-react"
+import { Activity, Coins, Server, MessageSquare, PanelRightClose } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { AVAILABLE_TOOLS } from "@/lib/agent-types"
 import { cn } from "@/lib/utils"
 
 export function AgentRuntimePanel() {
-  const { messages, isRunning, activeMessageId, config, toggleRightPanel } = useAgentStore()
+  const { messages, isRunning, activeMessageId, capabilities, capabilitiesError, toggleRightPanel } = useAgentStore()
 
   const activeMsg = messages.find((m) => m.id === activeMessageId) ?? (isRunning ? undefined : [...messages].reverse().find((m) => m.role === "agent"))
   const phase = derivePhase(activeMsg?.trace, isRunning)
@@ -20,11 +19,6 @@ export function AgentRuntimePanel() {
     tokens: messages.reduce((sum, m) => sum + (m.totalTokens ?? 0), 0),
     iters: messages.reduce((sum, m) => sum + (m.iterations ?? 0), 0),
   }
-
-  const enabledBuiltinCount = Object.values(config.enabledTools).filter(Boolean).length
-  const customCount = (config.customTools || []).filter((t) => t.enabled).length
-  const memoriesCount = (config.memories || []).filter((m) => m.enabled).length
-  const mcpEnabledCount = (config.mcpServers || []).filter((s) => s.enabled).length
 
   return (
     <div className="flex h-full flex-col bg-card/50">
@@ -37,7 +31,9 @@ export function AgentRuntimePanel() {
           <div>
             <h2 className="text-sm font-semibold leading-tight">Agent Runtime</h2>
             <p className="text-[10px] text-muted-foreground font-mono">
-              {config.provider.replace(/_/g, " ")} · {config.modelId}
+              {capabilities
+                ? `Nexum · protocol ${capabilities.protocolVersion} · ${capabilities.models.length} models`
+                : "Nexum · not connected"}
             </p>
           </div>
         </div>
@@ -79,50 +75,49 @@ export function AgentRuntimePanel() {
             </div>
           </section>
 
-          {/* Memory & Tools Status */}
+          {/* What the connected Nexum server reports it can do */}
           <section className="rounded-xl border border-border bg-background/50 p-2.5 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <Brain className="h-3 w-3 text-purple-500" />
-                <span>Memory & Tools</span>
+                <Server className="h-3 w-3 text-purple-500" />
+                <span>Nexum capabilities</span>
               </div>
-              <div className="flex gap-1">
-                <span className="font-mono text-[9px] text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
-                  {memoriesCount} memories
-                </span>
-                <span className="font-mono text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                  {enabledBuiltinCount + customCount} tools
-                </span>
-                <span className="font-mono text-[9px] text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">
-                  {mcpEnabledCount} MCP
-                </span>
-              </div>
+              {capabilities && (
+                <div className="flex gap-1">
+                  <CountBadge count={capabilities.tools.length} label="tools" className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" />
+                  <CountBadge count={capabilities.skills.length} label="skills" className="text-purple-600 dark:text-purple-400 bg-purple-500/10" />
+                  <CountBadge count={capabilities.mcp.length} label="MCP" className="text-cyan-600 dark:text-cyan-400 bg-cyan-500/10" />
+                </div>
+              )}
             </div>
-            <div className="flex flex-wrap gap-1">
-              {AVAILABLE_TOOLS.map((t) => {
-                const enabled = config.enabledTools[t.name] !== false
-                return (
+            {capabilitiesError && <p className="text-[10px] text-destructive">{capabilitiesError}</p>}
+            {capabilities && (
+              <div className="flex flex-wrap gap-1">
+                {capabilities.tools.map((t) => (
                   <span
-                    key={t.name}
-                    className={cn(
-                      "px-1.5 py-0.5 rounded font-mono text-[9px] transition",
-                      enabled ? "bg-muted text-foreground border border-border/60" : "bg-muted/30 text-muted-foreground/40 line-through"
-                    )}
+                    key={t.id}
+                    title={`${t.description}\nrisk: ${t.risk}${t.uiInvocable ? " · callable from generated UI" : ""}`}
+                    className="px-1.5 py-0.5 rounded font-mono text-[9px] bg-muted text-foreground border border-border/60"
                   >
-                    {t.name}
+                    {t.id}
                   </span>
-                )
-              })}
-              {(config.mcpServers || []).filter((s) => s.enabled).map((s) => (
-                <span
-                  key={s.id}
-                  className="px-1.5 py-0.5 rounded font-mono text-[9px] bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30"
-                  title={`MCP server: ${s.name} (${s.transport})`}
-                >
-                  mcp:{s.name}
-                </span>
-              ))}
-            </div>
+                ))}
+                {capabilities.mcp.map((s) => (
+                  <span
+                    key={s.name}
+                    className={cn(
+                      "px-1.5 py-0.5 rounded font-mono text-[9px] border",
+                      s.status === "connected"
+                        ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/30"
+                        : "bg-muted/30 text-muted-foreground/60 border-border/60 line-through",
+                    )}
+                    title={`MCP server: ${s.name} · ${s.status} · ${s.tools} tools · trust ${s.trust}`}
+                  >
+                    mcp:{s.name}
+                  </span>
+                ))}
+              </div>
+            )}
           </section>
         </div>
       </div>
@@ -132,6 +127,14 @@ export function AgentRuntimePanel() {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{children}</h3>
+}
+
+function CountBadge({ count, label, className }: { count: number; label: string; className: string }) {
+  return (
+    <span className={cn("font-mono text-[9px] px-1.5 py-0.5 rounded", className)}>
+      {count} {label}
+    </span>
+  )
 }
 
 function StatCard({ icon: Icon, value, label }: { icon: typeof Activity; value: number; label: string }) {
