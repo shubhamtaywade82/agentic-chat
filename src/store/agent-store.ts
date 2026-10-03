@@ -9,6 +9,7 @@ import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
 import { parseLearnCommand, generateSessionTitle } from "@/lib/memory-engine"
 import { mcpServerSlug } from "@/lib/mcp/types"
+import type { NexumCapabilities } from "@/lib/nexum"
 
 const STORAGE_KEY = "agentic_chat_sessions_v2"
 const CONFIG_KEY = "agentic_chat_config_v2"
@@ -45,6 +46,9 @@ interface AgentState {
   activeMessageId: string | null
   /** The Nexum run the current turn is streaming; needed to answer its interactions. */
   activeRunId: string | null
+  /** What the Nexum server reports it can do; null until loaded or while it is unreachable. */
+  capabilities: NexumCapabilities | null
+  capabilitiesError: string | null
   speed: number
   config: AgentConfig
   sidebarCollapsed: boolean
@@ -59,6 +63,7 @@ interface AgentState {
   loadModels: (provider?: LlmProvider, baseUrl?: string, apiKey?: string) => Promise<void>
   sendUserMessage: (text: string) => Promise<void>
   stopRun: () => void
+  loadCapabilities: () => Promise<void>
   resolveInteraction: (stepId: string, resolution: { approved?: boolean; selectedId?: string }) => Promise<void>
   setSpeed: (s: number) => void
   updateConfig: (partial: Partial<AgentConfig>) => void
@@ -131,6 +136,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   isRunning: false,
   activeMessageId: null,
   activeRunId: null,
+  capabilities: null,
+  capabilitiesError: null,
   speed: 1,
   config: DEFAULT_CONFIG,
   sidebarCollapsed: false,
@@ -419,6 +426,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   stopRun: () => activeAbort?.abort(),
+
+  loadCapabilities: async () => {
+    try {
+      const res = await fetch("/api/capabilities")
+      const json = (await res.json()) as { ok: boolean; capabilities?: NexumCapabilities; error?: string }
+      if (!json.ok || !json.capabilities) throw new Error(json.error ?? `Request failed (${res.status})`)
+      set({ capabilities: json.capabilities, capabilitiesError: null })
+    } catch (err: unknown) {
+      set({ capabilities: null, capabilitiesError: err instanceof Error ? err.message : String(err) })
+    }
+  },
 
   resolveInteraction: async (stepId, resolution) => {
     const { activeRunId, activeMessageId, messages } = get()

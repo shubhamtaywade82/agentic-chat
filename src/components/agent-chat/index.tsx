@@ -29,6 +29,8 @@ export function AgentChat() {
   const updateConfig = useAgentStore((s) => s.updateConfig)
   const clear = useAgentStore((s) => s.clear)
   const hydrateFromStorage = useAgentStore((s) => s.hydrateFromStorage)
+  const loadCapabilities = useAgentStore((s) => s.loadCapabilities)
+  const openuiSupported = useAgentStore((s) => s.capabilities?.outputFormats.includes("openui") ?? true)
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
   const rightPanelCollapsed = useAgentStore((s) => s.rightPanelCollapsed)
@@ -38,7 +40,8 @@ export function AgentChat() {
 
   useEffect(() => {
     hydrateFromStorage()
-  }, [hydrateFromStorage])
+    void loadCapabilities()
+  }, [hydrateFromStorage, loadCapabilities])
 
   // auto-scroll to bottom on new content
   useEffect(() => {
@@ -106,13 +109,20 @@ export function AgentChat() {
             variant="outline"
             size="sm"
             onClick={() => updateConfig({ openuiEnabled: !config.openuiEnabled })}
+            disabled={!openuiSupported}
             className={cn(
               "h-7 gap-1.5 px-2 text-xs font-mono transition",
               config.openuiEnabled
                 ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold"
                 : "text-muted-foreground hover:text-foreground"
             )}
-            title={config.openuiEnabled ? "OpenUI Generative UI: ON (click to disable)" : "OpenUI Generative UI: OFF (click to enable)"}
+            title={
+              !openuiSupported
+                ? "The connected Nexum server cannot produce OpenUI output"
+                : config.openuiEnabled
+                  ? "OpenUI Generative UI: ON (click to disable)"
+                  : "OpenUI Generative UI: OFF (click to enable)"
+            }
           >
             <LayoutDashboard className="h-3 w-3" />
             <span className="hidden md:inline">OpenUI:</span>
