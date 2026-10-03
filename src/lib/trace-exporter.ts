@@ -23,6 +23,15 @@ function formatStepMarkdown(step: TraceStep): string {
       return `### 👁️ Observation (${step.source})${time}\n**${step.summary}**\n\`\`\`json\n${JSON.stringify(step.data, null, 2)}\n\`\`\`\n`
     case "answer":
       return `### 💬 Final Answer\n\n${step.content}\n`
+    case "interaction": {
+      const asked = step.interaction === "approval" ? `${step.title}: ${step.summary}` : step.question
+      const outcome = step.resolution
+        ? step.resolution.approved !== undefined
+          ? (step.resolution.approved ? "approved" : "denied")
+          : `chose \`${step.resolution.selectedId}\``
+        : "unanswered"
+      return `### ✋ ${step.interaction === "approval" ? "Approval" : "Clarification"} requested\n${asked}\n\n**Outcome**: ${outcome}\n`
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { NexumClient, NexumHttpError } from "@/lib/nexum"
+import { NexumClient, NexumHttpError, describeNexumError } from "@/lib/nexum"
 import { nexumHostUrl } from "@/lib/nexum-client"
 
 /**
@@ -31,17 +31,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, data: result.data })
   } catch (err: unknown) {
     if (err instanceof NexumHttpError) {
-      return NextResponse.json({ ok: false, error: nexumErrorMessage(err) }, { status: err.status })
+      return NextResponse.json({ ok: false, error: describeNexumError(err) }, { status: err.status })
     }
     const message = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ ok: false, error: message }, { status: 502 })
-  }
-}
-
-function nexumErrorMessage(err: NexumHttpError): string {
-  try {
-    return (JSON.parse(err.body ?? "") as { message?: string }).message ?? err.message
-  } catch {
-    return err.message
   }
 }

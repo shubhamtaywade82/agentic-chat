@@ -13,9 +13,11 @@ import {
   AlertCircle,
   Clock,
   Coins,
+  ShieldQuestion,
 } from "lucide-react"
 import type { TraceStep } from "@/lib/agent-types"
 import { Markdown } from "./markdown"
+import { InteractionBody } from "./interaction-step"
 import { OpenUIAnswerRenderer } from "./openui-answer"
 import { looksLikeOpenUILang } from "@/lib/openui/detect"
 import { useAgentStore } from "@/store/agent-store"
@@ -67,6 +69,16 @@ const KIND_META = {
     border: "border-teal-500/20",
     text: "text-teal-600 dark:text-teal-400",
     dot: "bg-teal-500",
+  },
+  interaction: {
+    label: "Needs your input",
+    icon: ShieldQuestion,
+    accent: "orange",
+    ring: "ring-orange-500/20",
+    bg: "bg-orange-500/[0.04]",
+    border: "border-orange-500/20",
+    text: "text-orange-600 dark:text-orange-400",
+    dot: "bg-orange-500",
   },
   answer: {
     label: "Final Answer",
@@ -141,6 +153,8 @@ function StepHeader({
         return `Observation from ${step.source}`
       case "answer":
         return "Answer"
+      case "interaction":
+        return step.interaction === "approval" ? "Approval needed" : "Clarification needed"
     }
   })()
 
@@ -198,6 +212,8 @@ function StepBody({
       return <ObservationBody step={step} meta={KIND_META.observation} />
     case "answer":
       return <AnswerBody step={step} meta={meta} />
+    case "interaction":
+      return <InteractionBody step={step} />
   }
 }
 

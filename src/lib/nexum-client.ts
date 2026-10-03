@@ -4,7 +4,7 @@
  */
 
 import { NexumClient } from "./nexum/client";
-import type { CreateRunParams, RunEventEnvelope } from "./nexum/types";
+import type { RunEventEnvelope } from "./nexum/types";
 import { NexumError } from "./nexum/errors";
 
 export * from "./nexum";
@@ -27,20 +27,4 @@ export async function createNexumSession(baseUrl: string): Promise<string> {
   const client = new NexumClient({ baseUrl });
   const session = await client.sessions.create();
   return session.id;
-}
-
-export async function* streamNexumRun(
-  baseUrl: string,
-  sessionId: string,
-  params: CreateRunParams,
-  signal?: AbortSignal,
-): AsyncGenerator<NexumRunEvent> {
-  const client = new NexumClient({ baseUrl });
-  const run = await client.runs.create(sessionId, params, signal);
-  for await (const envelope of client.events.stream(run.id, { signal })) {
-    const event = (envelope.payload ?? envelope) as NexumRunEvent;
-    if (!event.runId) event.runId = envelope.runId;
-    if (!event.ts) event.ts = envelope.ts;
-    yield event;
-  }
 }

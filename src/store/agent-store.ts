@@ -3,7 +3,7 @@
 import { create } from "zustand"
 import type {
   AgentConfig, AgentMemoryItem, AgentMessage, ChatSession, CustomTool,
-  LlmProvider, ModelOption, ProviderApiKey, TraceStep, McpServerConfig
+  InteractionStep, LlmProvider, ModelOption, ProviderApiKey, TraceStep, McpServerConfig
 } from "@/lib/agent-types"
 import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
@@ -13,12 +13,38 @@ import { mcpServerSlug } from "@/lib/mcp/types"
 const STORAGE_KEY = "agentic_chat_sessions_v2"
 const CONFIG_KEY = "agentic_chat_config_v2"
 
+// Aborting the /api/agent fetch is how Stop works: the route sees the disconnect and cancels the Nexum run.
+let activeAbort: AbortController | null = null
+
+function patchInteractionStep(
+  messages: AgentMessage[],
+  messageId: string,
+  match: (step: InteractionStep) => boolean,
+  patch: Partial<InteractionStep>,
+): AgentMessage[] {
+  return messages.map((m) =>
+    m.id !== messageId
+      ? m
+      : { ...m, trace: m.trace?.map((t) => (t.kind === "interaction" && match(t) ? { ...t, ...patch } : t)) },
+  )
+}
+
+/** Interactions still pending when a run ends can no longer be answered. */
+function closePendingInteractions(messages: AgentMessage[], messageId: string): AgentMessage[] {
+  return patchInteractionStep(messages, messageId, (t) => t.status === "pending", {
+    status: "completed",
+    finishedAt: Date.now(),
+  })
+}
+
 interface AgentState {
   sessions: ChatSession[]
   activeSessionId: string
   messages: AgentMessage[]
   isRunning: boolean
   activeMessageId: string | null
+  /** The Nexum run the current turn is streaming; needed to answer its interactions. */
+  activeRunId: string | null
   speed: number
   config: AgentConfig
   sidebarCollapsed: boolean
@@ -32,6 +58,8 @@ interface AgentState {
   hydrateFromStorage: () => void
   loadModels: (provider?: LlmProvider, baseUrl?: string, apiKey?: string) => Promise<void>
   sendUserMessage: (text: string) => Promise<void>
+  stopRun: () => void
+  resolveInteraction: (stepId: string, resolution: { approved?: boolean; selectedId?: string }) => Promise<void>
   setSpeed: (s: number) => void
   updateConfig: (partial: Partial<AgentConfig>) => void
   addApiKey: (key: string, label: string) => void
@@ -102,6 +130,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   messages: [initialWelcomeMessage],
   isRunning: false,
   activeMessageId: null,
+  activeRunId: null,
   speed: 1,
   config: DEFAULT_CONFIG,
   sidebarCollapsed: false,
@@ -389,6 +418,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     })
   },
 
+  stopRun: () => activeAbort?.abort(),
+
+  resolveInteraction: async (stepId, resolution) => {
+    const { activeRunId, activeMessageId, messages } = get()
+    const step = messages.find((m) => m.id === activeMessageId)?.trace?.find((t) => t.id === stepId)
+    if (!activeRunId || !activeMessageId || step?.kind !== "interaction") return
+
+    const patch = (fields: Partial<InteractionStep>) =>
+      set((s) => ({ messages: patchInteractionStep(s.messages, activeMessageId, (t) => t.id === stepId, fields) }))
+    patch({ status: "running", error: undefined })
+    try {
+      const res = await fetch("/api/agent/interactions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: activeRunId, interactionId: step.interactionId, ...resolution }),
+      })
+      const json = (await res.json()) as { ok: boolean; error?: string }
+      // On success the stream's *.resolved event completes the step; on failure let the user retry.
+      if (!json.ok) patch({ status: "pending", error: json.error ?? `Request failed (${res.status})` })
+    } catch (err: unknown) {
+      patch({ status: "pending", error: err instanceof Error ? err.message : String(err) })
+    }
+  },
+
   sendUserMessage: async (text) => {
     if (get().isRunning) return
     const { config, activeSessionId, sessions } = get()
@@ -459,14 +511,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const initialSessions = sessions.map((sess) => (sess.id === activeSessionId ? { ...sess, title: sessionTitle, messages: initialMsgs, updatedAt: Date.now() } : sess))
     if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(initialSessions))
 
-    set({ messages: initialMsgs, sessions: initialSessions, isRunning: true, activeMessageId: agentMsgId })
+    set({ messages: initialMsgs, sessions: initialSessions, isRunning: true, activeMessageId: agentMsgId, activeRunId: null })
+    const abort = new AbortController()
+    activeAbort = abort
 
     let currentIter = 1
     let tokens = 0
 
     try {
       const res = await fetch("/api/agent", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
         body: JSON.stringify({ query: text, history, config, customTools: config.customTools, nexumSessionId: currentSession?.nexumSessionId }),
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
@@ -505,6 +559,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
           try {
             const parsed = JSON.parse(rawData)
+            if (parsed.kind === "run") {
+              set({ activeRunId: parsed.runId })
+              continue
+            }
+            if (parsed.kind === "interaction_resolved") {
+              set((s) => ({
+                messages: patchInteractionStep(s.messages, agentMsgId, (t) => t.interactionId === parsed.interactionId, {
+                  status: "completed",
+                  finishedAt: Date.now(),
+                  resolution: parsed.resolution,
+                  error: undefined,
+                }),
+              }))
+              continue
+            }
             currentIter = parsed.iteration || currentIter
             tokens += (parsed.tokensIn || 0) + (parsed.tokensOut || 0)
 
@@ -538,29 +607,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
 
       set((s) => {
-        const msgs = s.messages.map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now() } : m))
+        const msgs = closePendingInteractions(s.messages, agentMsgId).map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now() } : m))
         const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, title: sessionTitle, messages: msgs, updatedAt: Date.now() } : sess))
         if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        return { messages: msgs, isRunning: false, activeMessageId: null, sessions: updated }
+        return { messages: msgs, isRunning: false, activeMessageId: null, activeRunId: null, sessions: updated }
       })
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err)
+      const stoppedByUser = abort.signal.aborted
       set((s) => {
-        const msgs = s.messages.map((m) => {
+        const msgs = closePendingInteractions(s.messages, agentMsgId).map((m) => {
           if (m.id !== agentMsgId) return m
-          const errStep: TraceStep = {
+          const endStep: TraceStep = {
             id: `err_${Date.now()}`,
             kind: "answer",
-            status: "error",
+            status: stoppedByUser ? "completed" : "error",
             iteration: currentIter,
             startedAt: Date.now(),
             finishedAt: Date.now(),
-            content: `⚠️ **Agent Execution Error**: ${errorMsg}`,
+            content: stoppedByUser ? "⚠️ Run cancelled." : `⚠️ **Agent Execution Error**: ${errorMsg}`,
           }
-          return { ...m, trace: [...(m.trace || []), errStep], status: "error" as const, finishedAt: Date.now() }
+          return { ...m, trace: [...(m.trace || []), endStep], status: stoppedByUser ? ("completed" as const) : ("error" as const), finishedAt: Date.now() }
         })
-        return { messages: msgs, isRunning: false, activeMessageId: null }
+        return { messages: msgs, isRunning: false, activeMessageId: null, activeRunId: null }
       })
+    } finally {
+      if (activeAbort === abort) activeAbort = null
     }
   },
 }))

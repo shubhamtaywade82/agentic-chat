@@ -43,6 +43,8 @@ export interface CreateRunParams {
   strategy?: string;
   outputFormat?: OutputFormat;
   openuiSpec?: string;
+  /** This client shows approvals/clarifications to the user; otherwise Nexum denies/skips them. */
+  interactive?: boolean;
   timeoutMs?: number;
 }
 
@@ -54,8 +56,7 @@ export interface ToolResult {
 
 export interface InteractionResolution {
   approved?: boolean;
-  response?: string;
-  data?: Record<string, unknown>;
+  selectedId?: string;
 }
 
 export interface RunEventEnvelope {

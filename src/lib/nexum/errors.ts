@@ -30,3 +30,12 @@ export class NexumTimeoutError extends NexumError {
     this.name = "NexumTimeoutError";
   }
 }
+
+/** The server's human-readable message for a failed request, falling back to the HTTP-level one. */
+export function describeNexumError(err: NexumHttpError): string {
+  try {
+    return (JSON.parse(err.body ?? "") as { message?: string }).message ?? err.message;
+  } catch {
+    return err.message;
+  }
+}

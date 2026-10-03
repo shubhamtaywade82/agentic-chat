@@ -24,7 +24,7 @@ const EXAMPLES = [
 export function ChatInput() {
   const [text, setText] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { sendUserMessage, isRunning, speed, setSpeed } = useAgentStore()
+  const { sendUserMessage, stopRun, isRunning, speed, setSpeed } = useAgentStore()
 
   // auto-resize textarea
   useEffect(() => {
@@ -125,14 +125,14 @@ export function ChatInput() {
 
           <Button
             size="sm"
-            onClick={submit}
-            disabled={!text.trim() || isRunning}
+            onClick={isRunning ? stopRun : submit}
+            disabled={!isRunning && !text.trim()}
             className={cn("h-8 gap-1.5", isLearnCommand && "bg-purple-600 hover:bg-purple-700 text-white")}
           >
             {isRunning ? (
               <>
                 <Square className="h-3.5 w-3.5 fill-current" />
-                Running
+                Stop
               </>
             ) : isLearnCommand ? (
               <>

@@ -2,93 +2,77 @@ import { NextRequest } from "next/server"
 import type { AgentConfig, CustomTool } from "@/lib/agent-types"
 import { buildNexumOpenUISpec } from "@/lib/openui/prompt"
 import { runLegacyReactTurn } from "@/lib/legacy/react-agent"
-import { createNexumSession, nexumHostUrl, streamNexumRun, type CreateRunParams, type NexumRunEvent, type NexumRunOutput } from "@/lib/nexum-client"
+import { NexumClient, NexumHttpError, type CreateRunParams } from "@/lib/nexum"
+import { createNexumSession, nexumHostUrl } from "@/lib/nexum-client"
+import { newTurnState, translateNexumEvent, type NexumEvent } from "@/lib/nexum/wire"
 
 // Temporary escape hatch for one release while Nexum becomes the sole
 // execution path; remove together with src/lib/legacy/.
 const useLegacyAgent = process.env.AGENTIC_CHAT_LEGACY_AGENT === "true"
 
+type Send = (data: Record<string, unknown>) => void
+
 /**
- * Runs one turn through an external `nexum serve` host instead of the
- * in-process ReAct loop below, translating Nexum's NexumRunEvent stream
- * into the exact same `{kind, iteration, ...}` wire events this route has
- * always emitted — src/store/agent-store.ts (the only consumer) needs no
- * changes either way. See src/lib/nexum-client.ts for the scope/limits of
- * this first integration slice (no history/tool-config forwarding yet).
+ * Starts the turn's run, or, when the chat's session already has one in
+ * progress (a second tab, or a cancelled run still winding down), follows
+ * that run instead and says so. The new message is not sent in that case.
+ */
+async function openRun(client: NexumClient, sessionId: string, params: CreateRunParams, send: Send): Promise<string> {
+  try {
+    return (await client.runs.create(sessionId, params)).id
+  } catch (err) {
+    const activeRunId = activeRunOfConflict(err)
+    if (!activeRunId) throw err
+    send({
+      kind: "thinking",
+      iteration: 1,
+      title: "A run is already active in this chat",
+      reasoning: "Your message was not sent. Showing the run in progress; send it again once it finishes.",
+    })
+    return activeRunId
+  }
+}
+
+function activeRunOfConflict(err: unknown): string | null {
+  if (!(err instanceof NexumHttpError) || err.status !== 409) return null
+  try {
+    const body = JSON.parse(err.body ?? "") as { error?: string; runId?: unknown }
+    return body.error === "run_in_progress" && typeof body.runId === "string" ? body.runId : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Runs one turn through Nexum and relays its events as wire events (see
+ * src/lib/nexum/wire.ts). When `signal` aborts, the browser has gone away —
+ * nobody can answer an approval any more — so the Nexum run is cancelled
+ * rather than left running or blocked.
  */
 async function runViaNexum(
-  send: (data: Record<string, unknown>) => void,
+  send: Send,
   baseUrl: string,
   sessionId: string,
-  runParams: CreateRunParams,
+  params: CreateRunParams,
+  signal: AbortSignal,
 ): Promise<void> {
-  let iteration = 1
-  const toolIteration = new Map<string, number>()
-
+  const client = new NexumClient({ baseUrl })
+  const state = newTurnState()
   try {
-    for await (const event of streamNexumRun(baseUrl, sessionId, runParams)) {
-      switch (event.type) {
-        case "plan.updated": {
-          const e = event as NexumRunEvent & { goal: string; steps: { id: string; text: string; done: boolean }[] }
-          send({ kind: "plan", iteration, goal: e.goal, steps: e.steps })
-          break
-        }
-        case "thought": {
-          const e = event as NexumRunEvent & { text: string }
-          send({
-            kind: "thinking",
-            iteration,
-            title: iteration === 1 ? "Analyzing user query & plan" : `Iterative reasoning (cycle ${iteration})`,
-            reasoning: e.text,
-          })
-          break
-        }
-        case "tool.started": {
-          const e = event as NexumRunEvent & { callId: string; name: string; args: Record<string, unknown> }
-          toolIteration.set(e.callId, iteration)
-          send({
-            kind: "tool_call",
-            iteration,
-            toolName: e.name,
-            description: `Calling ${e.name} with parameters`,
-            args: e.args,
-          })
-          break
-        }
-        case "tool.completed": {
-          const e = event as NexumRunEvent & { callId: string; name: string; result: Record<string, unknown> }
-          const it = toolIteration.get(e.callId) ?? iteration
-          const summary =
-            typeof e.result?.summary === "string" ? (e.result.summary as string) : JSON.stringify(e.result).slice(0, 200)
-          send({ kind: "observation", iteration: it, source: e.name, summary, data: e.result })
-          iteration = it + 1
-          break
-        }
-        case "run.completed": {
-          const e = event as NexumRunEvent & { output: NexumRunOutput }
-          send({ kind: "answer", iteration, content: e.output.content, openuiActive: e.output.format === "openui" })
-          break
-        }
-        case "run.failed": {
-          const e = event as NexumRunEvent & { error: string }
-          send({ kind: "answer", iteration, content: `⚠️ **Agent Error**: ${e.error}` })
-          break
-        }
-        case "run.cancelled": {
-          send({ kind: "answer", iteration, content: "⚠️ Run cancelled." })
-          break
-        }
-        case "run.interrupted": {
-          const e = event as NexumRunEvent & { reason: string }
-          send({ kind: "answer", iteration, content: `⚠️ **Run Interrupted**: ${e.reason}` })
-          break
-        }
-        // "run.started" and "model.used" have no matching TraceStep kind — nothing to render.
-      }
+    const runId = await openRun(client, sessionId, params, send)
+    const cancelRun = () => void client.runs.cancel(runId).catch(() => {})
+    if (signal.aborted) cancelRun()
+    else signal.addEventListener("abort", cancelRun, { once: true })
+
+    for await (const envelope of client.events.stream(runId, { signal })) {
+      const event = (envelope.payload ?? envelope) as NexumEvent
+      if (!event.runId) event.runId = envelope.runId
+      for (const wireEvent of translateNexumEvent(event, state)) send(wireEvent)
     }
   } catch (err: unknown) {
+    if (signal.aborted) return
     const message = err instanceof Error ? err.message : String(err)
-    send({ kind: "answer", iteration, content: `⚠️ **Agent Error** (Nexum host): ${message}` })
+    send({ kind: "answer", iteration: state.iteration, content: `⚠️ **Agent Error** (Nexum host): ${message}` })
   }
 }
 
@@ -117,11 +101,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Aborts when the browser disconnects (Stop, refresh, closed tab); see runViaNexum.
+  const disconnected = new AbortController()
+  req.signal.addEventListener("abort", () => disconnected.abort())
+
   const encoder = new TextEncoder()
+  let closed = false
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (data: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+      const send: Send = (data) => {
+        if (!closed) controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
       }
 
       if (useLegacyAgent) {
@@ -130,14 +119,21 @@ export async function POST(req: NextRequest) {
         // Nexum decides whether UI fits the answer and labels the format;
         // the client only offers its component spec.
         const runParams: CreateRunParams = config.openuiEnabled
-          ? { goal: query, outputFormat: "openui", openuiSpec: buildNexumOpenUISpec() }
-          : { goal: query }
-        await runViaNexum(send, nexumUrl, resolvedNexumSessionId, runParams)
+          ? { goal: query, interactive: true, outputFormat: "openui", openuiSpec: buildNexumOpenUISpec() }
+          : { goal: query, interactive: true }
+        await runViaNexum(send, nexumUrl, resolvedNexumSessionId, runParams, disconnected.signal)
       } else {
         send({ kind: "answer", iteration: 1, content: `⚠️ **Agent Error**: could not reach Nexum at ${nexumUrl} — is \`nexum serve\` running?` })
       }
-      controller.enqueue(encoder.encode("data: [DONE]\n\n"))
-      controller.close()
+      if (!closed) {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+        controller.close()
+        closed = true
+      }
+    },
+    cancel() {
+      closed = true
+      disconnected.abort()
     },
   })
 

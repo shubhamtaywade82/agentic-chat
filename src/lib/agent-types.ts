@@ -16,6 +16,7 @@ export type StepKind =
   | "observation" // Result returned by a tool
   | "answer" // Final answer to the user
   | "plan" // High-level plan / decomposition
+  | "interaction" // The run is paused waiting for the user (approval / clarification)
 
 export interface BaseStep {
   id: string
@@ -69,12 +70,29 @@ export interface AnswerStep extends BaseStep {
   openuiActive?: boolean
 }
 
+export interface InteractionStep extends BaseStep {
+  kind: "interaction"
+  interactionId: string
+  interaction: "approval" | "clarification"
+  // approval
+  title?: string
+  summary?: string
+  // clarification
+  question?: string
+  options?: { id: string; label: string; description?: string }[]
+  /** Set once the interaction is resolved (by the user, a timeout, or a cancelled run). */
+  resolution?: { approved?: boolean; selectedId?: string }
+  /** Why the last attempt to answer failed; the step stays pending so the user can retry. */
+  error?: string
+}
+
 export type TraceStep =
   | ThinkingStep
   | PlanStep
   | ToolCallStep
   | ObservationStep
   | AnswerStep
+  | InteractionStep
 
 export interface AgentMessage {
   id: string
