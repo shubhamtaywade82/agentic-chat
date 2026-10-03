@@ -1,14 +1,8 @@
 import { NextRequest } from "next/server"
-import type { AgentConfig, CustomTool } from "@/lib/agent-types"
 import { buildNexumOpenUISpec } from "@/lib/openui/prompt"
-import { runLegacyReactTurn } from "@/lib/legacy/react-agent"
 import { NexumClient, NexumHttpError, type CreateRunParams } from "@/lib/nexum"
 import { createNexumSession, nexumHostUrl } from "@/lib/nexum-client"
 import { newTurnState, translateNexumEvent, type NexumEvent } from "@/lib/nexum/wire"
-
-// Temporary escape hatch for one release while Nexum becomes the sole
-// execution path; remove together with src/lib/legacy/.
-const useLegacyAgent = process.env.AGENTIC_CHAT_LEGACY_AGENT === "true"
 
 type Send = (data: Record<string, unknown>) => void
 
@@ -77,14 +71,11 @@ async function runViaNexum(
 }
 
 export async function POST(req: NextRequest) {
-  const { query, history = [], config, customTools = [], nexumSessionId } = (await req.json()) as {
+  const { query, openuiEnabled, nexumSessionId } = (await req.json()) as {
     query: string
-    history?: { role: "user" | "assistant"; content: string }[]
-    config: AgentConfig
-    customTools?: CustomTool[]
-    /** A Nexum host session from a prior turn in this chat, if one exists —
-     * reused instead of minting a fresh Nexum session per message so the
-     * conversation is continuous on the Nexum side too. */
+    openuiEnabled?: boolean
+    /** The Nexum session from a prior turn in this chat, if one exists; reused so
+     * the conversation stays continuous on the Nexum side. */
     nexumSessionId?: string
   }
 
@@ -93,12 +84,10 @@ export async function POST(req: NextRequest) {
   // persists it onto the ChatSession for the next turn to reuse.
   const nexumUrl = nexumHostUrl()
   let resolvedNexumSessionId: string | null = null
-  if (!useLegacyAgent) {
-    try {
-      resolvedNexumSessionId = nexumSessionId || (await createNexumSession(nexumUrl))
-    } catch {
-      // Surfaced as an answer-shaped error inside the stream below.
-    }
+  try {
+    resolvedNexumSessionId = nexumSessionId || (await createNexumSession(nexumUrl))
+  } catch {
+    // Surfaced as an answer-shaped error inside the stream below.
   }
 
   // Aborts when the browser disconnects (Stop, refresh, closed tab); see runViaNexum.
@@ -113,12 +102,10 @@ export async function POST(req: NextRequest) {
         if (!closed) controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
       }
 
-      if (useLegacyAgent) {
-        await runLegacyReactTurn(send, { query, history, config, customTools })
-      } else if (resolvedNexumSessionId) {
+      if (resolvedNexumSessionId) {
         // Nexum decides whether UI fits the answer and labels the format;
         // the client only offers its component spec.
-        const runParams: CreateRunParams = config.openuiEnabled
+        const runParams: CreateRunParams = openuiEnabled
           ? { goal: query, interactive: true, outputFormat: "openui", openuiSpec: buildNexumOpenUISpec() }
           : { goal: query, interactive: true }
         await runViaNexum(send, nexumUrl, resolvedNexumSessionId, runParams, disconnected.signal)

@@ -196,7 +196,7 @@ function CodeBlock({
 function normalizeMermaid(raw: string): string {
   let text = raw.trim()
 
-  // Stray hallucinated metadata line, e.g. "title=Trading Bot Flow"
+  // Stray hallucinated metadata line, e.g. "title=Deployment Flow"
   text = text.replace(/^\s*title\s*=.*$/gim, "")
 
   // Header says graph/flowchart but the body is actually a sequence diagram

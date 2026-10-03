@@ -15,28 +15,12 @@
  */
 
 import { generateSystemPrompt } from "@openuidev/lang-core"
-import type {
-  AgentMemoryItem,
-  CustomTool,
-} from "@/lib/agent-types"
-import type { McpToolDescriptor } from "@/lib/mcp/types"
-import { getToolSystemPrompt } from "@/lib/live-tools"
-import { formatMemoriesForPrompt } from "@/lib/memory-engine"
 // IMPORTANT: import the server-safe SPEC, not the React library. `prompt.ts`
 // is imported by the server-side `/api/agent` route handler, so it must NOT
 // pull in React or `@openuidev/react-lang`. The spec-only stubs in `spec.ts`
 // produce the same JSON schema + prompt spec as the React library, but
 // without any client-side runtime code.
 import { domainLibrarySpec } from "./spec"
-
-export interface BuildOpenUISystemPromptOpts {
-  baseSystemPrompt: string
-  memories: AgentMemoryItem[]
-  query: string
-  enabledTools: Record<string, boolean>
-  customTools: CustomTool[]
-  mcpTools: McpToolDescriptor[]
-}
 
 // Component-usage rules that hold for any agent runtime, local or Nexum.
 const COMPONENT_RULES = [
@@ -78,57 +62,3 @@ function generateComponentSpec(promptOptions: { preamble?: string; additionalRul
 export function buildNexumOpenUISpec(): string {
   return generateComponentSpec({ additionalRules: COMPONENT_RULES })
 }
-
-/**
- * Builds the augmented system prompt used when `openuiEnabled === true`.
- *
- * Layers:
- *   1. The agent's base ReAct system prompt (Plan/Thought/Action/Observation).
- *   2. OpenUI component spec (auto-generated from `domainLibrary`).
- *   3. The tool catalog (built-in + custom + MCP).
- *   4. Ranked long-term memories.
- *   5. A short instruction to prefer components over Markdown tables.
- *
- * We use `cloud: false` so no `THESYS_API_KEY` is required. The trade-off
- * is that without the Gateway's mid-stream autofix, ~10–20% of responses
- * from smaller models (especially local Ollama) may be malformed OpenUI
- * Lang. The client-side `looksLikeOpenUILang` detector + Markdown
- * fallback in `agent-message.tsx` handles this gracefully.
- */
-export function buildOpenUISystemPrompt(
-  opts: BuildOpenUISystemPromptOpts
-): string {
-  const componentSpec = generateComponentSpec({
-    preamble:
-      "You are rendering the Final Answer as a generative UI. Always " +
-      "wrap your response in a single `Stack` root component containing " +
-      "the domain components below. Use MarkdownFallback for any text " +
-      "that doesn't fit a domain component — never emit raw Markdown at " +
-      "the top level.",
-    additionalRules: [
-      "ALWAYS start your Final Answer with `root = Stack(...)` — never with raw text or Markdown.",
-      ...COMPONENT_RULES,
-      "Continue to emit Plan/Thought/Action/Action Input as plain text during the ReAct loop — only the Final Answer uses OpenUI Lang.",
-    ],
-  })
-
-  const toolBlock = getToolSystemPrompt(
-    opts.enabledTools,
-    opts.customTools,
-    opts.mcpTools
-  )
-  const memoryBlock = formatMemoriesForPrompt(opts.memories, opts.query)
-
-  return [
-    opts.baseSystemPrompt,
-    "",
-    "══════ OPENUI GENERATIVE-UI SPEC ══════",
-    componentSpec,
-    "══════ END OPENUI SPEC ══════",
-    "",
-    toolBlock,
-    memoryBlock,
-  ].join("\n")
-}
-
-export default buildOpenUISystemPrompt

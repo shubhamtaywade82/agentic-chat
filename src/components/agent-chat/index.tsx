@@ -8,7 +8,7 @@ import { UserMessageView } from "./user-message"
 import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
-import { AgentConfigDialog } from "./agent-config-dialog"
+import { NexumDialog } from "./nexum-dialog"
 import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -29,6 +29,7 @@ export function AgentChat() {
   const clear = useAgentStore((s) => s.clear)
   const hydrateFromStorage = useAgentStore((s) => s.hydrateFromStorage)
   const loadCapabilities = useAgentStore((s) => s.loadCapabilities)
+  const capabilities = useAgentStore((s) => s.capabilities)
   const openuiSupported = useAgentStore((s) => s.capabilities?.outputFormats.includes("openui") ?? true)
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
@@ -48,9 +49,6 @@ export function AgentChat() {
     if (!el) return
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [messages, activeMessageId, isRunning])
-
-  const activeProvider = isMounted ? config.provider : DEFAULT_CONFIG.provider
-  const activeModel = isMounted ? config.modelId : DEFAULT_CONFIG.modelId
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -127,12 +125,11 @@ export function AgentChat() {
           </Badge>
 
           {/* Settings Backdrop Trigger in Header */}
-          <AgentConfigDialog
+          <NexumDialog
             trigger={
               <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs font-mono">
                 <Settings className="h-3 w-3 text-muted-foreground" />
-                <span className="hidden sm:inline">{activeProvider.replace(/_/g, " ")}:</span>
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{activeModel}</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">Nexum</span>
               </Button>
             }
           />
@@ -194,9 +191,9 @@ export function AgentChat() {
       <footer className="flex h-7 shrink-0 items-center justify-between border-t border-border bg-background px-4 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Agent runtime online · Connected to {activeProvider.replace(/_/g, " ")}
+          {capabilities ? "Connected to Nexum" : "Nexum not connected"}
         </span>
-        <span className="font-mono">ReAct = Reason + Act + Observe · loop until answer</span>
+        <span className="font-mono">Plan · act · observe · answer</span>
       </footer>
     </div>
   )

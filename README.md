@@ -1,68 +1,52 @@
-# Agentic Chat — ReAct Agent Playground
+# Agentic Chat
 
 [![CI](https://github.com/shubhamtaywade82/agentic-chat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shubhamtaywade82/agentic-chat/actions/workflows/ci.yml)
 [![Deploy](https://github.com/shubhamtaywade82/agentic-chat/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/shubhamtaywade82/agentic-chat/actions/workflows/deploy.yml)
 
-An interactive Next.js 16 + TypeScript app that visualizes the agentic
-**ReAct (Reason + Act + Observe)** loop in real time. It connects directly to
-real LLM providers (Ollama, OpenAI, Anthropic, Gemini, Groq), executes live
-tools (Binance USD-M market data, DhanHQ Indian markets, prop-trading SMC/ICT
-scanners), and renders the full reasoning trace as a polished UI.
+A Next.js 16 + TypeScript chat client for a [Nexum](https://github.com/shubhamtaywade82/nexum)
+server. Nexum runs the agent (models, tools, skills, MCP, policy, credentials);
+this app shows what the agent is doing and lets you steer it.
 
-## Features
+## What it does
 
-- **Live ReAct loop visualization** — every Thought / Plan / Action /
-  Observation / Final Answer is rendered as a timeline step with token and
-  duration telemetry.
-- **Multi-provider LLM support** — Ollama (local/cloud), OpenAI, Anthropic,
-  Gemini, Groq, or any OpenAI-compatible custom endpoint.
-- **Live tool execution** — Binance USD-M (price, klines, depth, funding rate,
-  open interest, long/short ratio), DhanHQ Indian markets (LTP, holdings,
-  positions, funds), and built-in calculator / weather / web-search / code
-  interpreter tools.
-- **MCP (Model Context Protocol) integration** — extend the agent's tool
-  surface dynamically by plugging in any MCP server. All 7 official reference
-  servers are pre-configured and enabled by default (memory, time,
-  sequential-thinking, fetch, everything, filesystem, git). See
-  [MCP section](#mcp-model-context-protocol) below.
-- **Prop-trading engine** — Smart Money Concepts (SMC) / ICT setup scanner
-  (FVG, Order Blocks, Liquidity Pools, Market Structure, AMD cycles, Judas
-  swings, OTE zone, Silver Bullet windows) with multi-target RRR planning.
-- **Long-term memory** — `/learn <text>` in chat saves persistent memories that
-  get ranked by relevance and injected into every prompt.
-- **Multi-session** — sessions are persisted to localStorage with full-text
-  search and rename / delete.
-- **Futures dashboard** — `/dashboard` shows a TradingAgents-style multi-agent
-  layout: live price chart (lightweight-charts), order book WebSocket, setups,
-  sentiment, event-driven triggers.
-- **Custom tool extensions** — define JavaScript / HTTP / static JSON tools
-  in the UI and they become available to the agent's ReAct loop.
+- **Live run trace**: plans, thoughts, tool calls and observations appear as the
+  run happens, with a final answer at the end.
+- **Approvals and clarifications**: when a run needs your go-ahead (for example
+  a destructive command) or has to ask a question, it pauses and shows an
+  approve/deny or option card. Answering continues the same run.
+- **Stop**: halts the run on the server, not just in the browser.
+- **Generative UI (OpenUI)**: optionally lets the agent answer with cards,
+  tables, charts and metrics where the data fits. Nexum decides when; plain text
+  still renders as Markdown. See [docs/openui-integration.md](docs/openui-integration.md).
+- **Capabilities browser**: the runtime panel and the Nexum dialog list the
+  tools, skills, models and MCP servers the connected server reports.
+- **Sessions**: chats are stored in this browser's localStorage and each is bound
+  to one Nexum session, so the conversation continues across turns.
+
+## What it does not do
+
+It holds no model settings, API keys, tool configuration or credentials. All of
+that belongs to the Nexum server. Older versions stored provider keys in
+localStorage; they are deleted the first time this version loads.
 
 ## Quickstart
 
 ```bash
-# 1. Install dependencies
-npm install        # or: bun install
+# 1. Start a Nexum server (needs PostgreSQL and Redis; see the Nexum README)
+nexum serve                       # listens on http://127.0.0.1:3777
 
-# 2. (optional) Configure env vars
-cp .env.example .env.local
-# Edit .env.local to add Dhan/Binance credentials if needed.
-
-# 3. Run Prisma (optional — only if you plan to extend with server-side DB)
-npm run db:generate
-npm run db:push
-
-# 4. Start dev server
-npm run dev
-# Open http://localhost:3400
+# 2. Install and run this app
+npm install                       # or: bun install
+npm run dev                       # http://localhost:3400
 ```
 
-### Default LLM provider
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `NEXUM_HOST_URL` (or `NEXUM_SERVER_URL`) | Where the Nexum server is | `http://127.0.0.1:3777` |
+| `NEXUM_SERVER_TOKEN` (or `NEXUM_TOKEN`) | Bearer token, required if the server is not on loopback | none |
 
-The default provider is `ollama_local` pointing at `http://localhost:11434`.
-If you don't have Ollama installed, open **Configure Agent** (top-right
-gear button) and switch to OpenAI / Groq / Anthropic / Gemini, then paste your
-API key.
+The token is only ever used by this app's server-side routes; the browser never
+sees it.
 
 ## Project layout
 
@@ -70,49 +54,36 @@ API key.
 src/
 ├── app/
 │   ├── api/
-│   │   ├── agent/route.ts          # SSE ReAct loop endpoint
-│   │   ├── models/route.ts         # Lists models from the active provider
-│   │   ├── futures/{klines,depth,sentiment,setups,positions}/  # Market data
-│   │   ├── trading/test/route.ts   # Tests Dhan/Binance connection
-│   │   └── route.ts                # Health check
-│   ├── dashboard/page.tsx          # /dashboard — multi-agent view
-│   └── page.tsx                    # / — chat playground
+│   │   ├── agent/route.ts               # runs a turn on Nexum, streams events as SSE
+│   │   ├── agent/interactions/route.ts  # answers an approval / clarification
+│   │   ├── capabilities/route.ts        # proxies Nexum's /capabilities
+│   │   ├── tool/route.ts                # read-only tool calls from generated UI, via Nexum
+│   │   └── route.ts                     # health check
+│   ├── openui/                          # OpenUI playground
+│   └── page.tsx                         # the chat
 ├── components/
-│   ├── agent-chat/                 # Chat UI, trace steps, sidebar, config
-│   ├── futures-dashboard/          # Dashboard panels
-│   └── ui/                         # shadcn/ui primitives
+│   ├── agent-chat/                      # chat UI, trace steps, interaction cards, Nexum dialog
+│   └── ui/                              # shadcn/ui primitives
 ├── lib/
-│   ├── agent-types.ts              # AgentConfig, TraceStep, AVAILABLE_TOOLS
-│   ├── live-tools.ts               # Tool dispatcher (Binance/Dhan/general + MCP prompt injection)
-│   ├── mcp/                         # MCP integration (types, registry, client manager)
-│   ├── prop-engine.ts              # SMC/ICT setup evaluator
-│   ├── memory-engine.ts           # Memory ranking + /learn parsing
-│   ├── trace-exporter.ts          # Markdown / JSON trace export
-│   └── use-live-stream.ts         # Binance WebSocket tick streamer
-└── store/
-    ├── agent-store.ts              # Sessions, config, sendUserMessage (zustand)
-    └── dashboard-store.ts          # Dashboard symbol/interval prefs (zustand)
-
-packages/
-├── binance-client-ts/              # Local lightweight Binance USD-M client
-└── chart-sdk/                      # Local SMC/ICT technical analysis detectors
+│   ├── nexum/                           # Nexum client SDK + event translation (wire.ts)
+│   ├── openui/                          # component spec, React library, prompt, tool provider
+│   ├── agent-types.ts                   # trace and session types
+│   ├── session-utils.ts                 # chat titles and search
+│   └── trace-exporter.ts                # Markdown / JSON trace export
+└── store/agent-store.ts                 # sessions, run lifecycle, capabilities (zustand)
 ```
 
-## Architecture notes
+## How a turn works
 
-- The ReAct loop runs server-side in `src/app/api/agent/route.ts` as an SSE
-  stream. Each step (Plan, Thought, Action, Observation, Answer) is sent as a
-  JSON line; the client appends it to the active message's trace.
-- The agent uses a text-based ReAct protocol (`Plan:` / `Thought:` /
-  `Action:` / `Action Input:` / `Final Answer:`). The `parseAction` helper
-  accepts JSON-encoded, standard, and natural-language tool-call formats.
-- The local `binance-client-ts` package wraps the public Binance USD-M REST
-  API and adds optional HMAC-SHA256 signing for the few authenticated
-  endpoints used (e.g. `positionRisk`).
-- The local `chart-sdk` package implements deterministic SMC/ICT detectors
-  (FVG, Order Blocks, Liquidity Pools, Market Structure, OTE, AMD cycles,
-  Judas swings, etc.) and a combined `scanSetups` that produces a LONG /
-  SHORT / NO_TRADE direction with a confluence breakdown.
+1. The browser posts the message to `/api/agent`.
+2. The route creates (or reuses) the chat's Nexum session and starts a run,
+   marked `interactive` so approvals reach this UI.
+3. Nexum's events stream back and are translated into trace steps
+   (`src/lib/nexum/wire.ts`).
+4. Closing the connection (Stop, refresh, closed tab) makes the route cancel the
+   Nexum run.
+5. If the chat's session already has a run in progress (a second tab), the route
+   follows that run and says your message was not sent.
 
 ## Scripts
 
@@ -124,8 +95,6 @@ packages/
 | `npm run lint` | ESLint (next/core-web-vitals + typescript) |
 | `npm run typecheck` | TypeScript typecheck (`tsc --noEmit`) |
 | `npm run ci` | Lint + typecheck + build in one shot (mirrors CI) |
-| `npm run preinstall:mcp` | Pre-download all 7 reference MCP packages into the npx/uvx caches so first agent request is sub-second |
-| `npm run preinstall:mcp:check` | Verify (without downloading) that all MCP packages are cached; exits non-zero if any are missing |
 | `npm run db:push` | Apply Prisma schema to the SQLite DB |
 | `npm run db:generate` | Regenerate the Prisma client |
 
@@ -164,139 +133,6 @@ If that passes locally, CI will pass on GitHub Actions.
 The Z.ai Code sandbox-specific scripts under `.zscripts/` are platform hooks
 (used only inside the Z.ai Code sandbox), not part of the application. Runtime
 PIDs and logs in `.zscripts/` are gitignored.
-
-## MCP (Model Context Protocol)
-
-This app integrates the [Model Context Protocol](https://modelcontextprotocol.io) so the agent's tool surface can be extended dynamically — without writing new code or rebuilding. Plug in any MCP server (local via stdio, or remote via HTTP/SSE) and its tools become immediately available to the agent's ReAct loop.
-
-### Pre-configured reference servers
-
-All 7 official reference MCP servers are pre-configured in `DEFAULT_CONFIG.mcpServers` and enabled by default. Open **Configure Agent → MCP tab** to toggle them or edit their args.
-
-| Server | Transport | Package | Default | Tools |
-| --- | --- | --- | --- | --- |
-| `memory` | stdio (npx) | `@modelcontextprotocol/server-memory` | enabled | 9 — knowledge graph (entities, relations, observations) |
-| `time` | stdio (uvx) | `mcp-server-time` | enabled | 2 — current time, timezone conversion |
-| `sequentialthinking` | stdio (npx) | `@modelcontextprotocol/server-sequential-thinking` | enabled | 1 — dynamic thought sequences |
-| `fetch` | stdio (uvx) | `mcp-server-fetch` | enabled | 1 — web content → markdown |
-| `everything` | stdio (npx) | `@modelcontextprotocol/server-everything` | enabled | 13 — reference/test tools (echo, add, long-running-op, …) |
-| `filesystem` | stdio (npx) | `@modelcontextprotocol/server-filesystem /tmp` | enabled | 14 — read/write/list/search files |
-| `git` | stdio (uvx) | `mcp-server-git --repository .` | disabled | 12 — status, diff, log, commit, branch, … |
-
-Discovered tool count: **52 tools** across 7 servers (verified end-to-end).
-
-### How it works
-
-1. When the user sends a chat message, the `/api/agent` route spawns the `McpClientManager` (`src/lib/mcp/client.ts`).
-2. The manager connects to every enabled MCP server **in parallel** (stdio = spawn child process; http/sse = open HTTP/SSE connection).
-3. Each server's `listTools()` is called and the union of all tools is gathered.
-4. The MCP tools are appended to the LLM's system prompt alongside the built-in live tools, using the `mcp__<serverSlug>__<toolName>` naming convention so they're unambiguously routed back to the originating server.
-5. During the ReAct loop, if the agent emits an Action whose tool name starts with `mcp__`, the call is dispatched to the MCP manager; otherwise it goes to the built-in `executeLiveTool`.
-6. In a `finally` block, all MCP connections are closed — no orphan child processes.
-
-Failures are isolated: a single broken server is logged and skipped, the rest of the agent loop proceeds normally.
-
-### Managing MCP servers
-
-Open **Configure Agent** (top-right gear) → **MCP** tab. From there you can:
-
-- **Toggle** any pre-configured server on/off.
-- **Test** a server — spawns it, lists tools, shows a preview of the first 10 tool names + descriptions, reports errors.
-- **Edit** a server — change command, args, env vars (for stdio) or URL/headers (for http/sse).
-- **Add** a custom server — pick transport (stdio | http | sse), fill in the config, save.
-- **Remove** a server you no longer need.
-
-The agent runtime panel (right sidebar) shows a live `N MCP` chip and lists each enabled MCP server as a `mcp:<name>` chip in the tools list.
-
-### Adding a remote MCP server
-
-In the MCP tab, click **Add Server**, pick `http` or `sse` transport, and enter the server URL. Add any required auth headers (e.g. `Authorization: Bearer <token>`) in the headers field — they'll be sent on every request.
-
-```json
-{
-  "name": "my-remote-server",
-  "transport": "http",
-  "url": "https://mcp.example.com/mcp",
-  "headers": { "Authorization": "Bearer xxx" },
-  "enabled": true
-}
-```
-
-### Adding a local stdio MCP server
-
-Pick `stdio` transport, enter a command and one arg per line. Environment variables are `KEY=value`, one per line.
-
-```json
-{
-  "name": "github",
-  "transport": "stdio",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-github"],
-  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx" },
-  "enabled": true
-}
-```
-
-### MCP API endpoints
-
-| Endpoint | Purpose |
-| --- | --- |
-| `POST /api/mcp/tools` | Body: `{ servers: McpServerConfig[] }`. Returns the flattened list of all tools across all enabled servers. Used by the MCP tab to show tool counts. |
-| `POST /api/mcp/test` | Body: `{ server: McpServerConfig }`. Tests a single server connection and returns the tool list (or error). Used by the Test button. |
-| `GET /api/mcp/pool-stats` | Returns the current state of the MCP connection pool: entry count, total tools, per-entry refcount/age/idle time. Used for observability. |
-| `DELETE /api/mcp/pool-stats` | Evicts all entries from the pool. Forces re-connect on next agent request. |
-
-### MCP performance: connection pool + pre-warmed caches
-
-The MCP integration is optimized for both cold-start and steady-state latency:
-
-**Connection pool** (`src/lib/mcp/pool.ts`):
-- A process-global pool keeps each MCP server's `McpClientManager` alive across requests for up to **10 min of idle time**.
-- The first request after server boot pays the spawn cost (~500ms–2s per server); subsequent requests **reuse the pooled connection in ~17ms** (verified: 74× speedup).
-- **Reference counting** — an in-use connection is never evicted; `release()` just decrements the refcount.
-- **Health re-validation** — every `acquire()` pings the manager via the MCP `ping` method (5s timeout). If unhealthy, the connection is recreated transparently.
-- **Config-hash invalidation** — editing a server's config changes its hash, so the next `acquire()` creates a fresh connection with the new config. The old entry expires naturally.
-- **Sweeper** — a `setInterval` runs every 60s to evict idle entries whose TTL has expired. The timer auto-stops when the pool is empty (zero CPU when idle).
-- **Per-key mutex** — concurrent `acquire()` calls for the same config are serialized to prevent duplicate spawns.
-
-**Pre-warmed caches** (`scripts/preinstall-mcp.sh`):
-- Downloads all 7 reference MCP packages into the `npx` (`~/.npm/_npx`) and `uvx` (`/var/cache/uv` or `~/.cache/uv`) caches at install time.
-- Run automatically as a `postinstall` hook (non-fatal if npx/uvx aren't available).
-- Also run in CI (with `actions/cache` for both npx and uvx caches) and in the Dockerfile build stage.
-- After warming, spawning any reference MCP server is a sub-second operation.
-- Manual usage: `npm run preinstall:mcp` (install) or `npm run preinstall:mcp:check` (verify only).
-
-**Docker** (`Dockerfile`):
-- Multi-stage build: the build stage runs `preinstall-mcp.sh` and copies the warmed `~/.npm/_npx` and `/var/cache/uv` directories into the runtime image.
-- Result: the container starts in ~2s, and the first agent request is sub-second (no MCP download latency).
-- `HEALTHCHECK` polls `/api` every 30s.
-
-```bash
-# Build and run with Docker
-docker build -t agentic-chat .
-docker run -p 3400:3400 agentic-chat
-```
-
-### MCP file layout
-
-```
-src/lib/mcp/
-├── types.ts        # McpServerConfig, McpToolDescriptor, slug + name helpers
-├── registry.ts     # 7 pre-configured reference servers (buildDefaultMcpServers)
-├── client.ts       # McpClientManager — connectAll, callTool, ping, closeAll
-└── pool.ts         # McpConnectionPool — acquireConnection, getPoolStats, evictAll
-
-src/app/api/mcp/
-├── tools/route.ts      # POST: list tools from a set of servers
-├── test/route.ts       # POST: test a single server connection
-└── pool-stats/route.ts # GET: pool stats | DELETE: evict all entries
-
-scripts/
-└── preinstall-mcp.sh   # warm npx/uvx caches for all 7 reference packages
-
-src/components/agent-chat/
-└── mcp-tab.tsx     # UI for managing MCP servers (add/edit/test/toggle/remove)
-```
 
 ## License
 

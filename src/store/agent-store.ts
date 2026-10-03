@@ -1,14 +1,10 @@
 "use client"
 
 import { create } from "zustand"
-import type {
-  AgentConfig, AgentMemoryItem, AgentMessage, ChatSession, CustomTool,
-  InteractionStep, LlmProvider, ModelOption, ProviderApiKey, TraceStep, McpServerConfig
-} from "@/lib/agent-types"
-import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
+import type { AgentConfig, AgentMessage, ChatSession, InteractionStep, TraceStep } from "@/lib/agent-types"
+import { DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
-import { parseLearnCommand, generateSessionTitle } from "@/lib/memory-engine"
-import { mcpServerSlug } from "@/lib/mcp/types"
+import { generateSessionTitle } from "@/lib/session-utils"
 import type { NexumCapabilities } from "@/lib/nexum"
 
 const STORAGE_KEY = "agentic_chat_sessions_v2"
@@ -49,40 +45,18 @@ interface AgentState {
   /** What the Nexum server reports it can do; null until loaded or while it is unreachable. */
   capabilities: NexumCapabilities | null
   capabilitiesError: string | null
-  speed: number
   config: AgentConfig
   sidebarCollapsed: boolean
   rightPanelCollapsed: boolean
-  models: ModelOption[]
-  isLoadingModels: boolean
-  isLiveModels: boolean
   hydrated: boolean
 
   // Actions
   hydrateFromStorage: () => void
-  loadModels: (provider?: LlmProvider, baseUrl?: string, apiKey?: string) => Promise<void>
   sendUserMessage: (text: string) => Promise<void>
   stopRun: () => void
   loadCapabilities: () => Promise<void>
   resolveInteraction: (stepId: string, resolution: { approved?: boolean; selectedId?: string }) => Promise<void>
-  setSpeed: (s: number) => void
   updateConfig: (partial: Partial<AgentConfig>) => void
-  addApiKey: (key: string, label: string) => void
-  removeApiKey: (id: string) => void
-  toggleTool: (name: string) => void
-  saveCustomTool: (tool: CustomTool) => void
-  deleteCustomTool: (id: string) => void
-  toggleCustomTool: (id: string) => void
-  addMemory: (item: Omit<AgentMemoryItem, "id" | "createdAt" | "updatedAt">) => void
-  updateMemory: (id: string, partial: Partial<AgentMemoryItem>) => void
-  deleteMemory: (id: string) => void
-  toggleMemory: (id: string) => void
-  // MCP server management
-  addMcpServer: (server: Omit<McpServerConfig, "id">) => void
-  updateMcpServer: (id: string, partial: Partial<McpServerConfig>) => void
-  removeMcpServer: (id: string) => void
-  toggleMcpServer: (id: string) => void
-  resetConfig: () => void
   setSidebarCollapsed: (v: boolean) => void
   toggleSidebar: () => void
   toggleRightPanel: () => void
@@ -104,9 +78,6 @@ const initialWelcomeMessage: AgentMessage = {
   finishedAt: 1700000000000,
   iterations: 0,
   totalTokens: 0,
-  modelId: DEFAULT_CONFIG.modelId,
-  systemPrompt: DEFAULT_CONFIG.systemPrompt,
-  provider: DEFAULT_CONFIG.provider,
   trace: [
     {
       id: "welcome_answer",
@@ -116,7 +87,7 @@ const initialWelcomeMessage: AgentMessage = {
       startedAt: 1700000000000,
       finishedAt: 1700000000000,
       content:
-        "👋 Welcome to the **Agentic ReAct Runtime**.\n\nConnected directly to real LLM providers (**Ollama Local**, **Ollama Cloud**, **OpenAI**, **Groq**, etc.) with live tool execution.\n\n- **Ollama Local**: Zero API key needed.\n- **Ollama Cloud & Cloud Providers**: Multiple API key management.\n- **Live WebSocket Streams**: Real-time tick streams for Binance USD-M & Indian markets.\n- **Long-Term Memory & Learning**: Remembers trading facts, user preferences, and learned corrections (`/learn`).",
+        "👋 Welcome. This chat runs on a **Nexum** agent: plans, tool calls, approvals and results appear here as they happen, and anything that needs your go-ahead pauses the run until you answer.\n\nThe runtime panel lists the tools, skills and models the connected server offers.",
     },
   ],
 }
@@ -129,6 +100,21 @@ const defaultSession: ChatSession = {
   messages: [initialWelcomeMessage],
 }
 
+/**
+ * Older versions kept provider API keys and Dhan/Binance credentials in this
+ * browser's localStorage. Nexum owns all of that now, so keep only what is still
+ * a client preference and rewrite the stored copy so the secrets are gone.
+ */
+function migrateStoredConfig(saved: string | null): AgentConfig {
+  if (!saved) return { ...DEFAULT_CONFIG }
+  const stored = JSON.parse(saved) as Record<string, unknown>
+  const config: AgentConfig = { openuiEnabled: stored.openuiEnabled === true }
+  if (Object.keys(stored).some((key) => key !== "openuiEnabled")) {
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
+  }
+  return config
+}
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   sessions: [defaultSession],
   activeSessionId: initialSessionId,
@@ -138,103 +124,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   activeRunId: null,
   capabilities: null,
   capabilitiesError: null,
-  speed: 1,
   config: DEFAULT_CONFIG,
   sidebarCollapsed: false,
   rightPanelCollapsed: false,
-  models: AVAILABLE_MODELS.filter((m) => m.provider === DEFAULT_CONFIG.provider),
-  isLoadingModels: false,
-  isLiveModels: false,
   hydrated: false,
 
   hydrateFromStorage: () => {
     if (typeof window === "undefined" || get().hydrated) return
     try {
       const savedSessions = localStorage.getItem(STORAGE_KEY)
-      const savedConfig = localStorage.getItem(CONFIG_KEY)
-      // Shallow-merge saved config over defaults, then backfill any nested
-      // arrays/objects that the saved config might be missing (e.g. an old
-      // localStorage entry from before MCP was added).
-      const parsed = savedConfig ? { ...DEFAULT_CONFIG, ...JSON.parse(savedConfig) } : { ...DEFAULT_CONFIG }
-      // Migrate old cached prop-trading prompt to the new intent-first prompt
-      if (parsed.systemPrompt?.includes("systematic prop trading ReAct agent")) {
-        parsed.systemPrompt = DEFAULT_CONFIG.systemPrompt
-      }
-      // Migrate the intent-first default prompt forward to pick up new Mermaid diagram guidance
-      if (parsed.systemPrompt?.includes("INTENT DETECTION & WORKFLOW") && !parsed.systemPrompt?.includes("DIAGRAMS:")) {
-        parsed.systemPrompt = DEFAULT_CONFIG.systemPrompt
-      }
-      // Ollama Cloud provider selected but still pointing at a local-only model
-      // (stale from before Cloud model support was added) — bump to Gemma 4 31B.
-      if (parsed.provider === "ollama_cloud" && parsed.modelId === "llama3.2:3b") {
-        parsed.modelId = "gemma4:31b"
-      }
-      // Migrate deprecated api.ollama.com URL to direct ollama.com URL
-      if (parsed.apiBaseUrl?.includes("api.ollama.com")) {
-        parsed.apiBaseUrl = parsed.apiBaseUrl.replace("api.ollama.com", "ollama.com")
-      }
-      parsed.mcpServers = parsed.mcpServers && Array.isArray(parsed.mcpServers)
-        ? parsed.mcpServers
-        : (DEFAULT_CONFIG.mcpServers || [])
-      parsed.memories = parsed.memories || DEFAULT_CONFIG.memories || []
-      parsed.customTools = parsed.customTools || DEFAULT_CONFIG.customTools || []
-      parsed.apiKeys = parsed.apiKeys || DEFAULT_CONFIG.apiKeys || []
-      parsed.enabledTools = parsed.enabledTools || { ...DEFAULT_CONFIG.enabledTools }
-      parsed.dhan = { ...DEFAULT_CONFIG.dhan, ...(parsed.dhan || {}) }
-      parsed.binance = { ...DEFAULT_CONFIG.binance, ...(parsed.binance || {}) }
-      // Backfill openuiEnabled for configs saved before OpenUI integration
-      // landed. Defaults to false (off) so existing users see no behavior
-      // change until they explicitly opt in via the OpenUI tab.
-      if (typeof parsed.openuiEnabled !== "boolean") {
-        parsed.openuiEnabled = false
-      }
+      const config = migrateStoredConfig(localStorage.getItem(CONFIG_KEY))
 
       const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
       const activeId = parsedSessions[0]?.id || initialSessionId
       const activeMsgs = parsedSessions[0]?.messages || [initialWelcomeMessage]
 
-      set({
-        sessions: parsedSessions,
-        activeSessionId: activeId,
-        messages: activeMsgs,
-        config: parsed,
-        hydrated: true,
-      })
-      get().loadModels(parsed.provider, parsed.apiBaseUrl, parsed.apiKey)
+      set({ sessions: parsedSessions, activeSessionId: activeId, messages: activeMsgs, config, hydrated: true })
     } catch {
       set({ hydrated: true })
     }
   },
-
-  loadModels: async (providerOverride, baseUrlOverride, apiKeyOverride) => {
-    const provider = providerOverride || get().config.provider
-    const apiBaseUrl = baseUrlOverride !== undefined ? baseUrlOverride : get().config.apiBaseUrl
-    const apiKey = apiKeyOverride !== undefined ? apiKeyOverride : get().config.apiKey
-
-    set({ isLoadingModels: true })
-    try {
-      const params = new URLSearchParams({ provider, apiBaseUrl, apiKey })
-      const res = await fetch(`/api/models?${params.toString()}`)
-      if (res.ok) {
-        const data = await res.json()
-        const fetchedList: ModelOption[] = data.models || []
-        const currentModel = get().config.modelId
-        const hasCurrent = fetchedList.some((m) => m.id === currentModel)
-        const nextModel = hasCurrent ? currentModel : fetchedList[0]?.id || currentModel
-
-        set({ models: fetchedList, isLiveModels: Boolean(data.isLive), isLoadingModels: false })
-        if (nextModel !== currentModel) get().updateConfig({ modelId: nextModel })
-        return
-      }
-    } catch {
-      // Fallback
-    }
-
-    const fallback = AVAILABLE_MODELS.filter((m) => m.provider === provider)
-    set({ models: fallback.length > 0 ? fallback : AVAILABLE_MODELS, isLoadingModels: false, isLiveModels: false })
-  },
-
-  setSpeed: (s) => set({ speed: s }),
 
   updateConfig: (partial) => {
     set((s) => {
@@ -242,133 +151,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (typeof window !== "undefined") localStorage.setItem(CONFIG_KEY, JSON.stringify(nextConfig))
       return { config: nextConfig }
     })
-    if (partial.provider || partial.apiBaseUrl !== undefined || partial.apiKey !== undefined) {
-      get().loadModels(partial.provider, partial.apiBaseUrl, partial.apiKey)
-    }
-  },
-
-  addApiKey: (key, label) => {
-    const provider = get().config.provider
-    const newKey: ProviderApiKey = { id: `key_${Date.now()}`, label: label || `Key (${provider})`, key, provider, createdAt: Date.now() }
-    const updated = [...(get().config.apiKeys || []), newKey]
-    // Ollama Cloud unlocks much larger models than the local default — once a
-    // key is configured, jump straight to Gemma 4 31B instead of leaving the
-    // 3B local model selected under the cloud provider.
-    const modelOverride = provider === "ollama_cloud" ? { modelId: "gemma4:31b" } : {}
-    get().updateConfig({ apiKeys: updated, apiKey: key, ...modelOverride })
-  },
-
-  removeApiKey: (id) => {
-    const updated = (get().config.apiKeys || []).filter((k) => k.id !== id)
-    const activeKey = get().config.apiKey === id ? updated[0]?.key || "" : get().config.apiKey
-    get().updateConfig({ apiKeys: updated, apiKey: activeKey })
-  },
-
-  toggleTool: (name) => {
-    get().updateConfig({ enabledTools: { ...get().config.enabledTools, [name]: get().config.enabledTools[name] === false } })
-  },
-
-  saveCustomTool: (tool) => {
-    const updated = [...(get().config.customTools || []).filter((t) => t.id !== tool.id), tool]
-    get().updateConfig({ customTools: updated })
-  },
-
-  deleteCustomTool: (id) => {
-    const updated = (get().config.customTools || []).filter((t) => t.id !== id)
-    get().updateConfig({ customTools: updated })
-  },
-
-  toggleCustomTool: (id) => {
-    const updated = (get().config.customTools || []).map((t) => (t.id === id ? { ...t, enabled: !t.enabled } : t))
-    get().updateConfig({ customTools: updated })
-  },
-
-  addMemory: (item) => {
-    const newMem: AgentMemoryItem = {
-      id: `mem_${Date.now()}`,
-      category: item.category,
-      title: item.title,
-      content: item.content,
-      source: item.source || "user",
-      enabled: item.enabled !== false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
-    const updated = [newMem, ...(get().config.memories || [])]
-    get().updateConfig({ memories: updated })
-  },
-
-  updateMemory: (id, partial) => {
-    const updated = (get().config.memories || []).map((m) =>
-      m.id === id ? { ...m, ...partial, updatedAt: Date.now() } : m
-    )
-    get().updateConfig({ memories: updated })
-  },
-
-  deleteMemory: (id) => {
-    const updated = (get().config.memories || []).filter((m) => m.id !== id)
-    get().updateConfig({ memories: updated })
-  },
-
-  toggleMemory: (id) => {
-    const updated = (get().config.memories || []).map((m) =>
-      m.id === id ? { ...m, enabled: !m.enabled, updatedAt: Date.now() } : m
-    )
-    get().updateConfig({ memories: updated })
-  },
-
-  // ── MCP server management ───────────────────────────────────────────
-  addMcpServer: (server) => {
-    const newServer: McpServerConfig = {
-      ...server,
-      id: `mcp_${Date.now()}_${mcpServerSlug(server.name || "server")}`,
-    }
-    const updated = [...(get().config.mcpServers || []), newServer]
-    get().updateConfig({ mcpServers: updated })
-  },
-
-  updateMcpServer: (id, partial) => {
-    const updated = (get().config.mcpServers || []).map((s) =>
-      s.id === id ? { ...s, ...partial } : s
-    )
-    get().updateConfig({ mcpServers: updated })
-  },
-
-  removeMcpServer: (id) => {
-    const updated = (get().config.mcpServers || []).filter((s) => s.id !== id)
-    get().updateConfig({ mcpServers: updated })
-  },
-
-  toggleMcpServer: (id) => {
-    const updated = (get().config.mcpServers || []).map((s) =>
-      s.id === id ? { ...s, enabled: !s.enabled } : s
-    )
-    get().updateConfig({ mcpServers: updated })
-  },
-
-  resetConfig: () => {
-    // Deep-copy nested objects so DEFAULT_CONFIG is never mutated by later
-    // updateConfig calls (which would otherwise leak user edits back into the
-    // defaults used by future resetConfig() calls).
-    set({
-      config: {
-        ...DEFAULT_CONFIG,
-        enabledTools: { ...DEFAULT_CONFIG.enabledTools },
-        apiKeys: [...(DEFAULT_CONFIG.apiKeys || [])],
-        customTools: [...(DEFAULT_CONFIG.customTools || [])],
-        memories: (DEFAULT_CONFIG.memories || []).map((m) => ({ ...m })),
-        dhan: { ...DEFAULT_CONFIG.dhan },
-        binance: { ...DEFAULT_CONFIG.binance },
-        mcpServers: (DEFAULT_CONFIG.mcpServers || []).map((s) => ({
-          ...s,
-          args: s.args ? [...s.args] : undefined,
-          env: s.env ? { ...s.env } : undefined,
-          headers: s.headers ? { ...s.headers } : undefined,
-        })),
-      },
-    })
-    if (typeof window !== "undefined") localStorage.removeItem(CONFIG_KEY)
-    get().loadModels(DEFAULT_CONFIG.provider, DEFAULT_CONFIG.apiBaseUrl, DEFAULT_CONFIG.apiKey)
   },
 
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
@@ -466,64 +248,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const isDefaultTitle = !currentSession?.title || currentSession.title === "New Chat" || currentSession.title === "Initial Session" || currentSession.title.startsWith("sess_")
     const sessionTitle = isDefaultTitle ? generateSessionTitle(text) : currentSession.title
 
-    // Handle /learn command directly
-    const learnInfo = parseLearnCommand(text)
-    if (learnInfo) {
-      get().addMemory({
-        category: learnInfo.category,
-        title: learnInfo.title,
-        content: learnInfo.content,
-        source: "user",
-        enabled: true,
-      })
-      const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
-      const agentMsg: AgentMessage = {
-        id: `a_${Date.now()}`,
-        role: "agent",
-        query: text,
-        trace: [
-          {
-            id: `step_${Date.now()}`,
-            kind: "answer",
-            status: "completed",
-            iteration: 1,
-            startedAt: Date.now(),
-            finishedAt: Date.now(),
-            content: `🧠 **Learned & Saved to Agent Memory!**\n\n- **Category**: \`${learnInfo.category}\`\n- **Title**: ${learnInfo.title}\n- **Pattern**: "${learnInfo.content}"\n\nI will remember this context and automatically apply it in all future reasoning turns.`,
-          },
-        ],
-        status: "completed",
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        iterations: 1,
-        totalTokens: 0,
-      }
-      const updatedMsgs = [...get().messages, userMsg, agentMsg]
-      const updatedSessions = sessions.map((s) => (s.id === activeSessionId ? { ...s, title: sessionTitle, messages: updatedMsgs, updatedAt: Date.now() } : s))
-      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSessions))
-      set({ messages: updatedMsgs, sessions: updatedSessions })
-      return
-    }
-
     const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
     const agentMsgId = `a_${Date.now()}`
     const agentMsg: AgentMessage = {
       id: agentMsgId, role: "agent", query: text, trace: [], status: "running", startedAt: Date.now(),
-      iterations: 0, totalTokens: 0, modelId: config.modelId, systemPrompt: config.systemPrompt,
-      temperature: config.temperature, maxIterations: config.maxIterations, provider: config.provider,
+      iterations: 0, totalTokens: 0,
     }
-
-    const history = get().messages
-      .filter((m) => m.id !== userMsg.id && m.id !== agentMsgId)
-      .map((m) => {
-        if (m.role === "user") {
-          return { role: "user" as const, content: m.content || "" }
-        }
-        const answer = m.trace?.find((t) => t.kind === "answer")?.content || m.content || ""
-        return { role: "assistant" as const, content: answer }
-      })
-      .filter((m) => m.content.trim().length > 0)
-      .slice(-10)
 
     const initialMsgs = [...get().messages, userMsg, agentMsg]
     const initialSessions = sessions.map((sess) => (sess.id === activeSessionId ? { ...sess, title: sessionTitle, messages: initialMsgs, updatedAt: Date.now() } : sess))
@@ -539,7 +269,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const res = await fetch("/api/agent", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
-        body: JSON.stringify({ query: text, history, config, customTools: config.customTools, nexumSessionId: currentSession?.nexumSessionId }),
+        body: JSON.stringify({ query: text, openuiEnabled: config.openuiEnabled, nexumSessionId: currentSession?.nexumSessionId }),
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
 
