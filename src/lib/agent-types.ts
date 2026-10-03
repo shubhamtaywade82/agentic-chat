@@ -1,5 +1,7 @@
 // Core types for chat sessions and the run trace the UI renders
 
+import type { PresentationMode } from "@/lib/nexum"
+
 export type StepStatus = "pending" | "running" | "completed" | "error"
 
 export type StepKind =
@@ -54,11 +56,9 @@ export interface ObservationStep extends BaseStep {
 export interface AnswerStep extends BaseStep {
   kind: "answer"
   content: string
-  // Set when Nexum labels the answer as OpenUI (run.completed output.format).
-  // The client only attempts OpenUI Lang parsing when this is true: otherwise
-  // a plain Markdown answer that incidentally resembles the DSL (e.g. code
-  // with `Type.new(...)` calls) could get misrouted into the OpenUI renderer.
-  openuiActive?: boolean
+  // What Nexum says the answer is (run.completed output.format). The client renders by this alone,
+  // so a Markdown answer that merely resembles OpenUI Lang is never routed into the OpenUI renderer.
+  format?: "markdown" | "openui"
 }
 
 export interface InteractionStep extends BaseStep {
@@ -103,8 +103,8 @@ export interface AgentMessage {
  * credentials, MCP, memory) belongs to the Nexum server, not the browser.
  */
 export interface AgentConfig {
-  /** Ask Nexum for generative-UI (OpenUI) answers where it fits; see docs/openui-integration.md. */
-  openuiEnabled: boolean
+  /** How much generated UI (OpenUI) the user wants; Nexum decides each answer's format. See docs/openui-integration.md. */
+  presentation: PresentationMode
 }
 
 export interface ChatSession {
@@ -119,5 +119,5 @@ export interface ChatSession {
 }
 
 export const DEFAULT_CONFIG: AgentConfig = {
-  openuiEnabled: false,
+  presentation: "auto",
 }

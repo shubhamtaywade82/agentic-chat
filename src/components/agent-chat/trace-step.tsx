@@ -19,8 +19,6 @@ import type { TraceStep } from "@/lib/agent-types"
 import { Markdown } from "./markdown"
 import { InteractionBody } from "./interaction-step"
 import { OpenUIAnswerRenderer } from "./openui-answer"
-import { looksLikeOpenUILang } from "@/lib/openui/detect"
-import { useAgentStore } from "@/store/agent-store"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import {
@@ -233,9 +231,9 @@ function AnswerBody({
   step: Extract<TraceStep, { kind: "answer" }>
   meta: (typeof KIND_META)[keyof typeof KIND_META]
 }) {
-  const openuiEnabled = useAgentStore((s) => s.config.openuiEnabled === true)
   const content = step.content ?? ""
-  const useOpenUI = openuiEnabled && step.openuiActive === true && looksLikeOpenUILang(content)
+  // Nexum says what the answer is; the client never second-guesses it from the text.
+  const useOpenUI = step.format === "openui"
   const running = step.status === "running"
 
   return (

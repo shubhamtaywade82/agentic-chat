@@ -142,7 +142,7 @@ export function Markdown({ content, className }: { content: string; className?: 
   )
 }
 
-function CodeBlock({
+export function CodeBlock({
   language,
   children,
 }: {

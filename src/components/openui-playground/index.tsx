@@ -1,6 +1,7 @@
 "use client"
 
 import { componentSpecs } from "@/lib/openui/spec"
+import { PRESENTATION_LABELS } from "@/lib/presentation"
 import { useState } from "react"
 import Link from "next/link"
 import {
@@ -19,13 +20,11 @@ import { OpenUIAnswerRenderer } from "@/components/agent-chat/openui-answer"
 import { OPENUI_PRESETS } from "./presets"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 export function OpenUIPlayground() {
   const config = useAgentStore((s) => s.config)
-  const updateConfig = useAgentStore((s) => s.updateConfig)
   const [selectedPresetId, setSelectedPresetId] = useState(OPENUI_PRESETS[0].id)
   const [code, setCode] = useState(OPENUI_PRESETS[0].code)
   const [copied, setCopied] = useState(false)
@@ -83,15 +82,12 @@ export function OpenUIPlayground() {
 
         <div className="flex items-center gap-2">
           <div className="hidden items-center gap-2 rounded-lg border border-border bg-card/60 px-2.5 py-1 text-xs sm:flex">
-            <span className="text-[11px] text-muted-foreground">Chat Generative UI:</span>
-            <span className={`text-[11px] font-semibold ${config.openuiEnabled ? "text-emerald-500" : "text-muted-foreground"}`}>
-              {config.openuiEnabled ? "Enabled" : "Disabled"}
+            <span className="text-[11px] text-muted-foreground">Chat generated UI:</span>
+            <span
+              className={`text-[11px] font-semibold ${config.presentation !== "markdown" ? "text-emerald-500" : "text-muted-foreground"}`}
+            >
+              {PRESENTATION_LABELS[config.presentation].label}
             </span>
-            <Switch
-              checked={config.openuiEnabled === true}
-              onCheckedChange={(v) => updateConfig({ openuiEnabled: v })}
-              className="scale-75"
-            />
           </div>
 
           <Button asChild variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs">

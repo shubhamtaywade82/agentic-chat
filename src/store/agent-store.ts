@@ -5,6 +5,7 @@ import type { AgentConfig, AgentMessage, ChatSession, InteractionStep, TraceStep
 import { DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
 import { generateSessionTitle } from "@/lib/session-utils"
+import { migrateStoredConfig } from "@/lib/stored-config"
 import type { NexumCapabilities } from "@/lib/nexum"
 
 const STORAGE_KEY = "agentic_chat_sessions_v2"
@@ -100,21 +101,6 @@ const defaultSession: ChatSession = {
   messages: [initialWelcomeMessage],
 }
 
-/**
- * Older versions kept provider API keys and Dhan/Binance credentials in this
- * browser's localStorage. Nexum owns all of that now, so keep only what is still
- * a client preference and rewrite the stored copy so the secrets are gone.
- */
-function migrateStoredConfig(saved: string | null): AgentConfig {
-  if (!saved) return { ...DEFAULT_CONFIG }
-  const stored = JSON.parse(saved) as Record<string, unknown>
-  const config: AgentConfig = { openuiEnabled: stored.openuiEnabled === true }
-  if (Object.keys(stored).some((key) => key !== "openuiEnabled")) {
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
-  }
-  return config
-}
-
 export const useAgentStore = create<AgentState>((set, get) => ({
   sessions: [defaultSession],
   activeSessionId: initialSessionId,
@@ -133,7 +119,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (typeof window === "undefined" || get().hydrated) return
     try {
       const savedSessions = localStorage.getItem(STORAGE_KEY)
-      const config = migrateStoredConfig(localStorage.getItem(CONFIG_KEY))
+      const { config, rewrite } = migrateStoredConfig(localStorage.getItem(CONFIG_KEY))
+      if (rewrite) localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
 
       const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
       const activeId = parsedSessions[0]?.id || initialSessionId
@@ -269,7 +256,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const res = await fetch("/api/agent", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
-        body: JSON.stringify({ query: text, openuiEnabled: config.openuiEnabled, nexumSessionId: currentSession?.nexumSessionId }),
+        body: JSON.stringify({ query: text, presentation: config.presentation, nexumSessionId: currentSession?.nexumSessionId }),
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
 

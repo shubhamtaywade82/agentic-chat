@@ -14,6 +14,7 @@ import { generateSystemPrompt } from "@openuidev/lang-core"
 // pull in React or `@openuidev/react-lang`. The spec-only stubs in `spec.ts`
 // produce the same JSON schema + prompt spec as the React library, but
 // without any client-side runtime code.
+import type { OpenUiOffer } from "@/lib/nexum"
 import { domainLibrarySpec } from "./spec"
 
 // Component-usage rules, sent along with the component spec.
@@ -23,7 +24,7 @@ const COMPONENT_RULES = [
   "Use Table instead of a Markdown table, Chart for numeric series, and Alert for warnings or errors.",
   "Put a few key numbers side by side with `Grid(3, [Metric(...), Metric(...), Metric(...)])`.",
   "Use Card to group related content under a title, and Markdown for prose that no other component fits.",
-  "Use HtmlArtifact only for a one-off visual none of the other components can express; never put raw <script> or <style> outside it.",
+  "Use CodeBlock for code, commands and logs instead of putting them in Text or Markdown fences.",
 ]
 
 function generateComponentSpec(additionalRules: string[]): string {
@@ -45,10 +46,19 @@ function generateComponentSpec(additionalRules: string[]): string {
 }
 
 /**
- * The component spec sent to Nexum with `outputFormat: "openui"`. There is no
- * "always answer in OpenUI" preamble: Nexum's presentation policy decides when
- * UI fits the answer and falls back to Markdown otherwise.
+ * The OpenUI language version this client's library is written for: the `@openuidev/lang-core` release line.
+ * Nexum validates answers with the same parser version and refuses an offer it cannot validate.
  */
-export function buildNexumOpenUISpec(): string {
-  return generateComponentSpec(COMPONENT_RULES)
+export const OPENUI_SCHEMA_VERSION = "0.3.0"
+
+/**
+ * What this client offers Nexum for OpenUI answers: the prompt-ready spec and the library's JSON schema.
+ * There is no "always answer in OpenUI" preamble; whether UI fits is Nexum's decision.
+ */
+export function buildNexumOpenUIOffer(): OpenUiOffer {
+  return {
+    schemaVersion: OPENUI_SCHEMA_VERSION,
+    spec: generateComponentSpec(COMPONENT_RULES),
+    schema: domainLibrarySpec.toJSONSchema() as Record<string, unknown>,
+  }
 }

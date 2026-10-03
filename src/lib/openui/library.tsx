@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Markdown } from "@/components/agent-chat/markdown"
+import { CodeBlock, Markdown } from "@/components/agent-chat/markdown"
 import { componentSpecs, type ComponentName, type ComponentSpec } from "./spec"
 
 type Renderer = (props: ComponentRenderProps<unknown>) => React.ReactNode
@@ -257,21 +257,9 @@ const ActionButton = implement("ActionButton", ({ props }) => {
   )
 })
 
-const HtmlArtifact = implement("HtmlArtifact", ({ props }) => {
-  const p = propsOf<{ html: string; height: number }>(props)
-  const html = p.html ?? ""
-  return (
-    // `key={html}` forces a fresh iframe per content change: setting `srcDoc` on an existing
-    // iframe node is unreliable in Chrome (it can paint blank on first mount).
-    <iframe
-      key={html}
-      srcDoc={html}
-      sandbox="allow-scripts"
-      title="Generated content"
-      className="w-full rounded-lg border border-border bg-white"
-      style={{ height: `${p.height ?? 360}px` }}
-    />
-  )
+const Code = implement("CodeBlock", ({ props }) => {
+  const p = propsOf<{ code: string; language: string }>(props)
+  return <CodeBlock language={p.language || "text"}>{p.code ?? ""}</CodeBlock>
 })
 
 export const domainLibrary = createLibrary({
@@ -289,8 +277,8 @@ export const domainLibrary = createLibrary({
     Notice,
     ProgressBar,
     ChartBlock,
+    Code,
     ActionButton,
-    HtmlArtifact,
   ],
 })
 

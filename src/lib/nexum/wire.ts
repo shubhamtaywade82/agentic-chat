@@ -78,7 +78,7 @@ export function translateNexumEvent(event: NexumEvent, state: TurnState): WireEv
       return [{ kind: "interaction_resolved", interactionId: e.interactionId, resolution: { selectedId: e.selectedId } }]
     case "run.completed": {
       const output = e.output as NexumRunOutput
-      return [{ kind: "answer", iteration: state.iteration, content: output.content, openuiActive: output.format === "openui" }]
+      return [{ kind: "answer", iteration: state.iteration, content: output.content, format: output.format }]
     }
     case "run.failed":
       return [answer(state, `⚠️ **Agent Error**: ${e.error}`)]

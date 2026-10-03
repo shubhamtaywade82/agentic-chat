@@ -4,7 +4,7 @@
  * OpenUI `<Renderer>` wrapper for the agent's final-answer bubble.
  *
  * Pattern B from docs/openui-integration.md §3. When the answer content
- * looks like OpenUI Lang (detected via `looksLikeOpenUILang`), mount this
+ * is labelled `openui` by Nexum, mount this
  * component instead of the existing Markdown renderer. It progressively
  * parses the streaming content into a tree of domain components (charts,
  * cards, tables) and renders them live as tokens arrive.

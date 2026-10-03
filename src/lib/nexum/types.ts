@@ -1,5 +1,20 @@
 export type OutputFormat = "markdown" | "openui" | "json" | "text";
 
+/** How much generated UI the user wants; Nexum decides the actual format of each answer. */
+export type PresentationMode = "auto" | "markdown" | "openui";
+
+/** What this client can render in OpenUI: prompt-ready spec plus the schema Nexum validates answers against. */
+export interface OpenUiOffer {
+  schemaVersion: string;
+  spec: string;
+  schema: Record<string, unknown>;
+}
+
+export interface PresentationRequest {
+  mode: PresentationMode;
+  openui?: OpenUiOffer;
+}
+
 export interface NexumRunOutput {
   format: OutputFormat;
   content: string;
@@ -41,8 +56,7 @@ export interface NexumRun {
 export interface CreateRunParams {
   goal: string;
   strategy?: string;
-  outputFormat?: OutputFormat;
-  openuiSpec?: string;
+  presentation?: PresentationRequest;
   /** This client shows approvals/clarifications to the user; otherwise Nexum denies/skips them. */
   interactive?: boolean;
   timeoutMs?: number;
@@ -104,7 +118,7 @@ export interface NexumCapabilities {
   serverVersion?: string;
   agents: string[];
   strategies: string[];
-  outputFormats: OutputFormat[];
+  presentations: { format: OutputFormat; schemaVersion?: string }[];
   tools: NexumToolInfo[];
   skills: NexumSkillInfo[];
   models: NexumModelInfo[];

@@ -3,10 +3,12 @@
 import { useState } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Switch } from "@/components/ui/switch"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { useAgentStore } from "@/store/agent-store"
+import { PRESENTATION_LABELS, PRESENTATION_MODES, serverSupportsOpenUI } from "@/lib/presentation"
+import type { PresentationMode } from "@/lib/nexum"
 
 /**
  * What the connected Nexum server offers, plus the one client-side preference
@@ -15,7 +17,7 @@ import { useAgentStore } from "@/store/agent-store"
 export function NexumDialog({ trigger }: { trigger: React.ReactNode }) {
   const [open, setOpen] = useState(false)
   const { config, updateConfig, isRunning, capabilities, capabilitiesError, loadCapabilities } = useAgentStore()
-  const openuiSupported = capabilities?.outputFormats.includes("openui") ?? false
+  const openuiSupported = capabilities ? serverSupportsOpenUI(capabilities) : false
 
   return (
     <Dialog
@@ -47,20 +49,29 @@ export function NexumDialog({ trigger }: { trigger: React.ReactNode }) {
 
           <div className="scroll-thin mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
             <TabsContent value="output">
-              <div className="flex items-start justify-between gap-4 rounded-xl border border-border p-3">
-                <div className="space-y-1">
-                  <Label className="text-sm font-semibold">Generative UI answers (OpenUI)</Label>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Lets the agent answer with cards, tables and charts where the data fits. Nexum decides when
-                    that applies and labels the result; plain text still renders as Markdown.
-                    {!openuiSupported && " The connected server cannot produce OpenUI output."}
-                  </p>
-                </div>
-                <Switch
-                  checked={config.openuiEnabled}
-                  onCheckedChange={(v) => updateConfig({ openuiEnabled: v })}
-                  disabled={isRunning || !openuiSupported}
-                />
+              <div className="space-y-2 rounded-xl border border-border p-3">
+                <Label className="text-sm font-semibold">Generated UI</Label>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  How much the agent may answer with cards, tables and charts. Nexum decides each answer's format and
+                  labels it; Markdown is always the fallback.
+                  {!openuiSupported && " The connected server cannot produce generated UI."}
+                </p>
+                <RadioGroup
+                  value={config.presentation}
+                  onValueChange={(value) => updateConfig({ presentation: value as PresentationMode })}
+                  disabled={isRunning}
+                  className="gap-2 pt-1"
+                >
+                  {PRESENTATION_MODES.map((mode) => (
+                    <Label key={mode} className="flex cursor-pointer items-start gap-2 text-xs font-normal">
+                      <RadioGroupItem value={mode} disabled={mode === "openui" && !openuiSupported} className="mt-0.5" />
+                      <span>
+                        <span className="font-medium">{PRESENTATION_LABELS[mode].label}</span>
+                        <span className="block text-muted-foreground">{PRESENTATION_LABELS[mode].description}</span>
+                      </span>
+                    </Label>
+                  ))}
+                </RadioGroup>
               </div>
             </TabsContent>
 

@@ -135,14 +135,12 @@ export const componentSpecs = {
       variant: z.enum(["default", "outline", "ghost", "destructive"]).optional().describe("Default: default."),
     }),
   },
-  HtmlArtifact: {
-    name: "HtmlArtifact",
-    description:
-      "Renders self-contained HTML (inline <style>/<script> allowed) in a sandboxed iframe with no access " +
-      "to the parent page. Use ONLY for a one-off visual none of the other components can express.",
+  CodeBlock: {
+    name: "CodeBlock",
+    description: "Syntax-highlighted code or command output with a copy button.",
     props: z.object({
-      html: z.string().describe("Self-contained HTML document or fragment."),
-      height: z.number().optional().describe("Iframe height in pixels. Default: 360."),
+      code: z.string().describe("The code or text to show."),
+      language: z.string().optional().describe("Language for highlighting, e.g. typescript, ruby, bash. Default: text."),
     }),
   },
 } satisfies Record<string, ComponentSpec>

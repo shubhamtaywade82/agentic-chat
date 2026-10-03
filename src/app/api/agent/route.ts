@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
-import { buildNexumOpenUISpec } from "@/lib/openui/prompt"
-import { NexumClient, NexumHttpError, type CreateRunParams } from "@/lib/nexum"
+import { buildNexumOpenUIOffer } from "@/lib/openui/prompt"
+import { NexumClient, NexumHttpError, type CreateRunParams, type PresentationMode } from "@/lib/nexum"
 import { createNexumSession, nexumHostUrl } from "@/lib/nexum-client"
 import { newTurnState, translateNexumEvent, type NexumEvent } from "@/lib/nexum/wire"
 
@@ -71,9 +71,10 @@ async function runViaNexum(
 }
 
 export async function POST(req: NextRequest) {
-  const { query, openuiEnabled, nexumSessionId } = (await req.json()) as {
+  const { query, presentation = "auto", nexumSessionId } = (await req.json()) as {
     query: string
-    openuiEnabled?: boolean
+    /** How much generated UI the user wants; Nexum decides each answer's actual format. */
+    presentation?: PresentationMode
     /** The Nexum session from a prior turn in this chat, if one exists; reused so
      * the conversation stays continuous on the Nexum side. */
     nexumSessionId?: string
@@ -103,11 +104,13 @@ export async function POST(req: NextRequest) {
       }
 
       if (resolvedNexumSessionId) {
-        // Nexum decides whether UI fits the answer and labels the format;
-        // the client only offers its component spec.
-        const runParams: CreateRunParams = openuiEnabled
-          ? { goal: query, interactive: true, outputFormat: "openui", openuiSpec: buildNexumOpenUISpec() }
-          : { goal: query, interactive: true }
+        // Nexum decides whether UI fits the answer and labels the format; the client only says what
+        // it can render and how much UI the user wants.
+        const runParams: CreateRunParams = {
+          goal: query,
+          interactive: true,
+          presentation: { mode: presentation, ...(presentation === "markdown" ? {} : { openui: buildNexumOpenUIOffer() }) },
+        }
         await runViaNexum(send, nexumUrl, resolvedNexumSessionId, runParams, disconnected.signal)
       } else {
         send({ kind: "answer", iteration: 1, content: `⚠️ **Agent Error**: could not reach Nexum at ${nexumUrl} — is \`nexum serve\` running?` })

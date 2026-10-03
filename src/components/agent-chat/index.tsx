@@ -9,6 +9,7 @@ import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
 import { NexumDialog } from "./nexum-dialog"
+import { PRESENTATION_LABELS, PRESENTATION_MODES, serverSupportsOpenUI } from "@/lib/presentation"
 import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -30,13 +31,18 @@ export function AgentChat() {
   const hydrateFromStorage = useAgentStore((s) => s.hydrateFromStorage)
   const loadCapabilities = useAgentStore((s) => s.loadCapabilities)
   const capabilities = useAgentStore((s) => s.capabilities)
-  const openuiSupported = useAgentStore((s) => s.capabilities?.outputFormats.includes("openui") ?? true)
+  const openuiSupported = useAgentStore((s) => serverSupportsOpenUI(s.capabilities))
   const sidebarCollapsed = useAgentStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAgentStore((s) => s.toggleSidebar)
   const rightPanelCollapsed = useAgentStore((s) => s.rightPanelCollapsed)
   const toggleRightPanel = useAgentStore((s) => s.toggleRightPanel)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  const cyclePresentation = () => {
+    const modes = PRESENTATION_MODES.filter((m) => m !== "openui" || openuiSupported)
+    updateConfig({ presentation: modes[(modes.indexOf(config.presentation) + 1) % modes.length] })
+  }
 
   useEffect(() => {
     hydrateFromStorage()
@@ -99,25 +105,18 @@ export function AgentChat() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => updateConfig({ openuiEnabled: !config.openuiEnabled })}
-            disabled={!openuiSupported}
+            onClick={cyclePresentation}
             className={cn(
               "h-7 gap-1.5 px-2 text-xs font-mono transition",
-              config.openuiEnabled
+              config.presentation !== "markdown"
                 ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold"
                 : "text-muted-foreground hover:text-foreground"
             )}
-            title={
-              !openuiSupported
-                ? "The connected Nexum server cannot produce OpenUI output"
-                : config.openuiEnabled
-                  ? "OpenUI Generative UI: ON (click to disable)"
-                  : "OpenUI Generative UI: OFF (click to enable)"
-            }
+            title={`Generated UI: ${PRESENTATION_LABELS[config.presentation].description} Click to change.`}
           >
             <LayoutDashboard className="h-3 w-3" />
-            <span className="hidden md:inline">OpenUI:</span>
-            <span>{config.openuiEnabled ? "ON" : "OFF"}</span>
+            <span className="hidden md:inline">UI:</span>
+            <span>{PRESENTATION_LABELS[config.presentation].label}</span>
           </Button>
 
           <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
