@@ -5,8 +5,9 @@ import { nexumHostUrl } from "@/lib/nexum-client"
 /**
  * Tool calls from OpenUI-rendered components (`Query(...)`, `@Run`), proxied
  * to the chat's Nexum session. Nexum owns execution, credentials and policy,
- * and only runs read-only tools here; anything that changes state must go
- * through an agent run (e.g. `@ToAssistant`). This route stays server-side
+ * and only runs tools that opted in to direct calls from generated UI (see
+ * `uiInvocable` in /capabilities); everything else, and anything that changes
+ * state, must go through an agent run (e.g. `@ToAssistant`). This route stays server-side
  * only so the Nexum token never reaches the browser.
  *
  * Body: `{ tool: string, args?: Record<string, unknown>, nexumSessionId: string }`

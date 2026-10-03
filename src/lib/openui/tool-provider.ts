@@ -5,9 +5,10 @@
  * a function map, so any tool name the generated UI uses reaches Nexum —
  * no hand-kept list of names to drift from Nexum's catalog. Each call POSTs
  * to `/api/tool`, which proxies to the chat's Nexum session; Nexum executes
- * read-only tools under its own credentials and policy and refuses the rest.
+ * the tools that opted in to UI calls under its own credentials and policy and
+ * refuses the rest.
  *
- * See docs/openui-integration.md §5.4 (Pattern D).
+ * See docs/openui-integration.md.
  */
 
 import type { McpClientLike } from "@openuidev/react-lang"
