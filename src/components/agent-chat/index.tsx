@@ -9,7 +9,6 @@ import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
 import { AgentConfigDialog } from "./agent-config-dialog"
-import { LiveTickerBar } from "./live-ticker-bar"
 import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -91,12 +90,6 @@ export function AgentChat() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
-            <Link href="/dashboard">
-              <LineChart className="h-3 w-3 text-muted-foreground" />
-              <span className="hidden sm:inline">Dashboard</span>
-            </Link>
-          </Button>
 
           <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
             <Link href="/openui">
@@ -162,7 +155,6 @@ export function AgentChat() {
       </header>
 
       {/* Live WebSocket Ticker Stream Bar */}
-      <LiveTickerBar />
 
       {/* Body */}
       <div className="flex min-h-0 flex-1 overflow-hidden">

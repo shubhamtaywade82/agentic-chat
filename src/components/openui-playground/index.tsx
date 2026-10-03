@@ -59,12 +59,6 @@ export function OpenUIPlayground() {
             </Link>
           </Button>
 
-          <Button asChild variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-xs">
-            <Link href="/dashboard">
-              <LineChart className="h-3.5 w-3.5 text-cyan-500" />
-              <span className="hidden sm:inline">Dashboard</span>
-            </Link>
-          </Button>
 
           <div className="h-4 w-px bg-border" />
 
