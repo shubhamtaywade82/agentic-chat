@@ -1,5 +1,6 @@
 "use client"
 
+import { componentSpecs } from "@/lib/openui/spec"
 import { useState } from "react"
 import Link from "next/link"
 import {
@@ -140,7 +141,7 @@ export function OpenUIPlayground() {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               className="flex-1 resize-none font-mono text-xs leading-relaxed scroll-thin bg-card/40 border-border"
-              placeholder="Enter OpenUI Lang (e.g. Stack { BinancePriceCard(...) })"
+              placeholder={`Enter OpenUI Lang, e.g. root = Stack("md", [Metric("Open issues", "12")])`}
               spellCheck={false}
             />
             <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
@@ -151,13 +152,11 @@ export function OpenUIPlayground() {
 
           {/* Component Catalog summary */}
           <footer className="border-t border-border bg-card/40 p-2.5">
-            <p className="text-[10px] font-medium text-muted-foreground mb-1.5">Domain Component Library (11 Registered)</p>
+            <p className="text-[10px] font-medium text-muted-foreground mb-1.5">
+              Component library ({Object.keys(componentSpecs).length} registered)
+            </p>
             <div className="flex flex-wrap gap-1">
-              {[
-                "Stack", "Text", "BinancePriceCard", "OrderBookTable",
-                "TradeSetupCard", "FundingRateCard", "RiskCalculatorCard",
-                "StatBlock", "ActionButton", "HtmlArtifact", "MarkdownFallback",
-              ].map((name) => (
+              {Object.keys(componentSpecs).map((name) => (
                 <Badge key={name} variant="secondary" className="font-mono text-[9px] py-0 px-1.5">
                   {name}
                 </Badge>

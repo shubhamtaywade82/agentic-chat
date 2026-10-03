@@ -6,11 +6,11 @@
  *
  * OpenUI Lang always opens with a PascalCase component call:
  *
- *     BinancePriceCard(symbol: "BTCUSDT", price: 67000.5) { ... }
+ *     Metric("Open issues", "12") { ... }
  *
  * Or contains action statements prefixed with `@`:
  *
- *     @Run binance_price { symbol: "BTCUSDT" }
+ *     @Run get_weather { location: "Tokyo" }
  *     @Set state.field = "value"
  *
  * Or `Query(...)` / `Mutation(...)` calls for runtime tool invocation.
@@ -39,15 +39,47 @@ export function looksLikeOpenUILang(s: string | undefined | null): boolean {
   return false
 }
 
+// `name:` at the start of a call argument, followed by something that can begin a value.
+const NAMED_ARGUMENT = /(\s*)[A-Za-z_][A-Za-z0-9_]*\s*:\s*(?=[\[{"'\d\-a-zA-Z])/y
+
 /**
- * Normalizes OpenUI Lang output from models that emit named arguments with
- * colons (e.g. `Stack(gap: "md", children: [...])`) into the strict positional
- * syntax required by OpenUI Lang (`Stack("md", [...])`).
+ * Rewrites named call arguments (`Stack(gap: "md", children: [...])`), which some
+ * models emit, into the positional syntax OpenUI Lang requires (`Stack("md", [...])`).
+ *
+ * Only names in call-argument position are stripped. Keys of object literals
+ * (`{name: "Requests", values: [1, 2]}`) and text inside strings are left alone.
  */
 export function normalizeOpenUILang(input: string | undefined | null): string {
   if (!input) return ""
-  return input.replace(
-    /([,(]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(?=[\[{"'\d\-a-zA-Z])/g,
-    "$1"
-  )
+  let output = ""
+  const openBrackets: string[] = []
+  let quote: string | null = null
+  let atArgumentStart = false
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i]
+    if (quote) {
+      output += char
+      if (char === "\\") output += input[++i] ?? ""
+      else if (char === quote) quote = null
+      continue
+    }
+    if (atArgumentStart) {
+      NAMED_ARGUMENT.lastIndex = i
+      const named = NAMED_ARGUMENT.exec(input)
+      if (named) {
+        output += named[1]
+        i += named[0].length - 1
+        atArgumentStart = false
+        continue
+      }
+    }
+    if (char === '"' || char === "'") quote = char
+    if (char === "(" || char === "[" || char === "{") openBrackets.push(char)
+    else if (char === ")" || char === "]" || char === "}") openBrackets.pop()
+    const insideCall = openBrackets[openBrackets.length - 1] === "("
+    atArgumentStart = insideCall && (char === "(" || char === "," || (atArgumentStart && /\s/.test(char)))
+    output += char
+  }
+  return output
 }

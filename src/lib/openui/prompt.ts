@@ -1,17 +1,11 @@
 /**
- * OpenUI system-prompt builder (Pattern B — self-hosted).
+ * Builds the OpenUI component spec that agentic-chat offers to Nexum.
  *
- * When `openuiEnabled` is true on the agent config, the system prompt is
- * augmented with the auto-generated OpenUI component spec so the LLM
- * knows which components it can emit. We use `cloud: false` (self-hosted)
- * so this works with ANY provider — OpenAI, Anthropic, Groq, Ollama, etc.
- * — without requiring a `THESYS_API_KEY`.
+ * `generateSystemPrompt` from `@openuidev/lang-core` is framework-agnostic (no
+ * React import), so it is safe to call inside the `/api/agent` route handler.
+ * We use `cloud: false` (self-hosted): no THESYS_API_KEY is needed.
  *
- * `generateSystemPrompt` from `@openuidev/lang-core` is framework-agnostic
- * (no React import), so it's safe to call server-side inside the
- * `/api/agent` route handler.
- *
- * See docs/openui-integration.md §6.
+ * See docs/openui-integration.md.
  */
 
 import { generateSystemPrompt } from "@openuidev/lang-core"
@@ -22,21 +16,17 @@ import { generateSystemPrompt } from "@openuidev/lang-core"
 // without any client-side runtime code.
 import { domainLibrarySpec } from "./spec"
 
-// Component-usage rules that hold for any agent runtime, local or Nexum.
+// Component-usage rules, sent along with the component spec.
 const COMPONENT_RULES = [
   "Arguments are strictly positional: write `Stack(\"md\", [items])`, NOT `Stack(gap: \"md\", children: [items])`. Never use parameter names with colons.",
-  "Prefer BinancePriceCard over a Markdown table for a single price.",
-  "Prefer OrderBookTable when showing depth.",
-  "Prefer TradeSetupCard for any prop_scan_setups or prop_evaluate_pair result.",
-  "Prefer FundingRateCard for binance_funding_rate results.",
-  "Prefer RiskCalculatorCard for prop_risk_calculator results.",
-  "Use multiple StatBlock tiles in a Stack for a quick-metrics summary.",
-  "For plain text/explanations with no domain component fit, use MarkdownFallback(\"...\"). " +
-    "For a genuinely custom visual (e.g. a one-off chart or diagram) no domain component " +
-    "covers, use HtmlArtifact instead — never inline raw <script>/<style> outside it.",
+  "Start with `root = Stack(...)` and put every other component inside it.",
+  "Use Table instead of a Markdown table, Chart for numeric series, and Alert for warnings or errors.",
+  "Put a few key numbers side by side with `Grid(3, [Metric(...), Metric(...), Metric(...)])`.",
+  "Use Card to group related content under a title, and Markdown for prose that no other component fits.",
+  "Use HtmlArtifact only for a one-off visual none of the other components can express; never put raw <script> or <style> outside it.",
 ]
 
-function generateComponentSpec(promptOptions: { preamble?: string; additionalRules: string[] }): string {
+function generateComponentSpec(additionalRules: string[]): string {
   // `toSpec()` returns the serializable PromptSpec (components, root, groups)
   // that `generateSystemPrompt` accepts as `library`. We additionally attach
   // the JSON schema (used by the parser at runtime for prop validation).
@@ -50,15 +40,15 @@ function generateComponentSpec(promptOptions: { preamble?: string; additionalRul
       componentGroups: spec.componentGroups,
       schema: domainLibrarySpec.toJSONSchema(),
     },
-    promptOptions,
+    promptOptions: { additionalRules },
   })
 }
 
 /**
- * Component spec sent to Nexum with `outputFormat: "openui"`. No preamble:
- * Nexum's presentation policy decides when UI is warranted, so the local
- * "always answer in OpenUI" and ReAct-format rules don't apply there.
+ * The component spec sent to Nexum with `outputFormat: "openui"`. There is no
+ * "always answer in OpenUI" preamble: Nexum's presentation policy decides when
+ * UI fits the answer and falls back to Markdown otherwise.
  */
 export function buildNexumOpenUISpec(): string {
-  return generateComponentSpec({ additionalRules: COMPONENT_RULES })
+  return generateComponentSpec(COMPONENT_RULES)
 }

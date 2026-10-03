@@ -72,10 +72,9 @@ export function OpenUIAnswerRenderer({
   const normalizedContent = useMemo(() => normalizeOpenUILang(content), [content])
 
   const handleError = (errors: unknown) => {
-    // OpenUI surfaces parse errors here. The renderer itself renders a
-    // `MarkdownFallback` card for unknown roots, so the user still sees
-    // *something*. We log at debug level only — partial parses are normal
-    // during streaming.
+    // OpenUI surfaces parse errors here. We log at debug level only: partial
+    // parses are normal during streaming, and a render crash is caught by
+    // OpenUIErrorBoundary, which falls back to the Markdown renderer.
     if (typeof console !== "undefined") {
       console.debug("[openui] parse errors", errors)
     }
