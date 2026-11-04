@@ -59,3 +59,4 @@ server.log
 tsconfig.tsbuildinfo
 
 .omc/
+.nexum
