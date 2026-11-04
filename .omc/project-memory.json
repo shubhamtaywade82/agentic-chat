@@ -1,0 +1,215 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1793821772470,
+  "projectRoot": "/home/nemesis/projects/ai-agents/agentic-chat",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "next",
+        "version": "16.1.1",
+        "category": "fullstack"
+      },
+      {
+        "name": "react",
+        "version": "19.0.0",
+        "category": "frontend"
+      },
+      {
+        "name": "react-dom",
+        "version": "19.0.0",
+        "category": "frontend"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "npm run build",
+    "testCommand": null,
+    "lintCommand": "npm run lint",
+    "devCommand": "npm run dev",
+    "scripts": {
+      "dev": "next dev -p 3400 2>&1 | tee dev.log",
+      "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
+      "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+      "lint": "eslint .",
+      "typecheck": "tsc --noEmit",
+      "ci": "npm run lint && npm run typecheck && npm run build",
+      "preinstall:mcp": "bash scripts/preinstall-mcp.sh",
+      "preinstall:mcp:check": "bash scripts/preinstall-mcp.sh --check",
+      "postinstall": "bash scripts/preinstall-mcp.sh >/dev/null 2>&1 || echo 'MCP preinstall skipped (non-fatal)'",
+      "db:push": "prisma db push --accept-data-loss",
+      "db:generate": "prisma generate",
+      "db:migrate": "prisma migrate dev",
+      "db:reset": "prisma migrate reset"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": "type-based"
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "examples",
+      "public",
+      "scripts",
+      "src",
+      "tests"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "db": {
+      "path": "db",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1793821772442,
+      "keyFiles": [
+        "custom.db"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1793821772443,
+      "keyFiles": [
+        "openui-integration.md"
+      ]
+    },
+    "download": {
+      "path": "download",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1793821772451,
+      "keyFiles": [
+        "README.md"
+      ]
+    },
+    "examples": {
+      "path": "examples",
+      "purpose": "Example code",
+      "fileCount": 0,
+      "lastAccessed": 1793821772456,
+      "keyFiles": []
+    },
+    "mini-services": {
+      "path": "mini-services",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1793821772457,
+      "keyFiles": []
+    },
+    "packages": {
+      "path": "packages",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1793821772461,
+      "keyFiles": []
+    },
+    "prisma": {
+      "path": "prisma",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1793821772461,
+      "keyFiles": [
+        "schema.prisma"
+      ]
+    },
+    "public": {
+      "path": "public",
+      "purpose": "Public files",
+      "fileCount": 2,
+      "lastAccessed": 1793821772461,
+      "keyFiles": [
+        "logo.svg",
+        "robots.txt"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 1,
+      "lastAccessed": 1793821772464,
+      "keyFiles": [
+        "preinstall-mcp.sh"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1793821772465,
+      "keyFiles": []
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 3,
+      "lastAccessed": 1793821772466,
+      "keyFiles": [
+        "database-runtime-build.sh",
+        "python-runtime-build.sh",
+        "python-runtime-container.sh"
+      ]
+    },
+    "src/app": {
+      "path": "src/app",
+      "purpose": "Application code",
+      "fileCount": 4,
+      "lastAccessed": 1793821772468,
+      "keyFiles": [
+        "globals.css",
+        "icon.svg",
+        "layout.tsx"
+      ]
+    },
+    "src/components": {
+      "path": "src/components",
+      "purpose": "UI components",
+      "fileCount": 2,
+      "lastAccessed": 1793821772468,
+      "keyFiles": [
+        "theme-provider.tsx",
+        "theme-toggle.tsx"
+      ]
+    },
+    "src/lib": {
+      "path": "src/lib",
+      "purpose": "Library code",
+      "fileCount": 9,
+      "lastAccessed": 1793821772469,
+      "keyFiles": [
+        "agent-types.ts",
+        "custom-tool-runner.ts",
+        "db.ts"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}
