@@ -309,6 +309,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               }))
               continue
             }
+            if (parsed.kind === "answer_delta" || parsed.kind === "thinking_delta") {
+              const field = parsed.kind === "answer_delta" ? "draftAnswer" : "draftThinking"
+              set((s) => ({
+                messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, [field]: (m[field] ?? "") + parsed.content } : m)),
+              }))
+              continue
+            }
             currentIter = parsed.iteration || currentIter
             tokens += (parsed.tokensIn || 0) + (parsed.tokensOut || 0)
 
@@ -328,6 +335,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 const nextTrace = [...(m.trace || []), newStep]
                 return {
                   ...m,
+                  // The final event supersedes its draft; text streamed before a tool call was narration.
+                  draftThinking: parsed.kind === "thinking" ? undefined : m.draftThinking,
+                  draftAnswer: parsed.kind === "tool_call" || parsed.kind === "answer" ? undefined : m.draftAnswer,
                   trace: nextTrace,
                   iterations: currentIter,
                   totalTokens: tokens,
@@ -342,7 +352,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
 
       set((s) => {
-        const msgs = closePendingInteractions(s.messages, agentMsgId).map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now() } : m))
+        const msgs = closePendingInteractions(s.messages, agentMsgId).map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now(), draftAnswer: undefined, draftThinking: undefined } : m))
         const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, title: sessionTitle, messages: msgs, updatedAt: Date.now() } : sess))
         if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
         return { messages: msgs, isRunning: false, activeMessageId: null, activeRunId: null, sessions: updated }
@@ -362,7 +372,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             finishedAt: Date.now(),
             content: stoppedByUser ? "⚠️ Run cancelled." : `⚠️ **Agent Execution Error**: ${errorMsg}`,
           }
-          return { ...m, trace: [...(m.trace || []), endStep], status: stoppedByUser ? ("completed" as const) : ("error" as const), finishedAt: Date.now() }
+          return { ...m, trace: [...(m.trace || []), endStep], status: stoppedByUser ? ("completed" as const) : ("error" as const), finishedAt: Date.now(), draftAnswer: undefined, draftThinking: undefined }
         })
         return { messages: msgs, isRunning: false, activeMessageId: null, activeRunId: null }
       })

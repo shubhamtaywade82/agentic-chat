@@ -35,6 +35,10 @@ export function translateNexumEvent(event: NexumEvent, state: TurnState): WireEv
           reasoning: e.text,
         },
       ]
+    case "thought.delta":
+      return [{ kind: "thinking_delta", content: e.text }]
+    case "answer.delta":
+      return [{ kind: "answer_delta", content: e.text }]
     case "tool.started":
       state.toolIteration.set(e.callId, state.iteration)
       return [

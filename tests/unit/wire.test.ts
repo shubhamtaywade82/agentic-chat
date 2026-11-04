@@ -75,6 +75,12 @@ describe("translateNexumEvent", () => {
     expect(answer.content as string).toContain(text)
   })
 
+  it("should relay streamed text fragments as draft deltas", () => {
+    const state = newTurnState()
+    expect(translateNexumEvent({ type: "answer.delta", text: "Hel" }, state)).toEqual([{ kind: "answer_delta", content: "Hel" }])
+    expect(translateNexumEvent({ type: "thought.delta", text: "hm" }, state)).toEqual([{ kind: "thinking_delta", content: "hm" }])
+  })
+
   it("should ignore events with nothing to render", () => {
     expect(translate({ type: "model.used", tier: "fast", model: "m" })).toEqual([])
   })

@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 import type { AgentMessage } from "@/lib/agent-types"
 import { TraceStepView } from "./trace-step"
+import { Markdown } from "./markdown"
 import { useAgentStore } from "@/store/agent-store"
 import { exportTraceToMarkdown, copyToClipboard } from "@/lib/trace-exporter"
 import { cn } from "@/lib/utils"
@@ -32,6 +33,7 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
   // auto-collapse once — the user can still re-expand freely afterward.
   const priorSteps = trace.filter((s) => s.kind !== "answer")
   const answerSteps = trace.filter((s) => s.kind === "answer")
+  const hasDraft = running && Boolean(message.draftThinking || message.draftAnswer)
   const [stepsOpen, setStepsOpen] = useState(running)
   const [prevRunning, setPrevRunning] = useState(running)
   if (running !== prevRunning) {
@@ -118,7 +120,7 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
         </div>
 
         {/* Trace Timeline */}
-        {trace.length > 0 ? (
+        {trace.length > 0 || hasDraft ? (
           <div className="space-y-0">
             {priorSteps.length > 0 && (
               <Collapsible open={stepsOpen} onOpenChange={setStepsOpen} className="mb-1">
@@ -136,6 +138,7 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
             {answerSteps.map((step, i) => (
               <TraceStepView key={step.id} step={step} index={priorSteps.length + i} isLast />
             ))}
+            {running && <LiveDraft thinking={message.draftThinking} answer={message.draftAnswer} />}
           </div>
         ) : (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -146,4 +149,24 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
       </div>
     </motion.div>
   )
+}
+
+// OpenUI Lang source is unreadable half-written; the real UI replaces this placeholder when the run completes.
+const OPENUI_SOURCE_PREFIX = /^\s*root\s*=/
+
+function LiveDraft({ thinking, answer }: { thinking?: string; answer?: string }) {
+  if (answer) {
+    return OPENUI_SOURCE_PREFIX.test(answer) ? (
+      <div className="flex items-center gap-2 pt-1 text-sm text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span className="shimmer-text">Generating interface…</span>
+      </div>
+    ) : (
+      <div className="pt-1 text-sm">
+        <Markdown content={answer} />
+      </div>
+    )
+  }
+  if (!thinking) return null
+  return <p className="max-h-40 overflow-y-auto whitespace-pre-wrap pt-1 text-xs italic text-muted-foreground">{thinking}</p>
 }

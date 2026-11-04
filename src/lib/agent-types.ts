@@ -96,6 +96,9 @@ export interface AgentMessage {
   finishedAt?: number
   totalTokens?: number
   iterations?: number
+  /** Live preview of the answer / reasoning while the model is still writing; replaced by the final steps. */
+  draftAnswer?: string
+  draftThinking?: string
 }
 
 /**
