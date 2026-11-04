@@ -122,7 +122,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const { config, rewrite } = migrateStoredConfig(localStorage.getItem(CONFIG_KEY))
       if (rewrite) localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
 
-      const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
+      const storedSessions: ChatSession[] = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
+      // A run cannot survive a page reload, so a stored "running" message is one that was cut off.
+      const parsedSessions = storedSessions.map((sess) => ({
+        ...sess,
+        messages: sess.messages.map((m) => (m.status === "running" ? { ...m, status: "error" as const } : m)),
+      }))
       const activeId = parsedSessions[0]?.id || initialSessionId
       const activeMsgs = parsedSessions[0]?.messages || [initialWelcomeMessage]
 

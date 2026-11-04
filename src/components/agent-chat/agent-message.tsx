@@ -142,8 +142,8 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
           </div>
         ) : (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            <span className="shimmer-text">Initializing agent…</span>
+            {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            <span className={running ? "shimmer-text" : undefined}>{running ? "Initializing agent…" : "Interrupted before a response."}</span>
           </div>
         )}
       </div>
