@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { useAgentStore } from "@/store/agent-store"
-import { AgentConfigDialog } from "./agent-config-dialog"
-import { searchSessions } from "@/lib/memory-engine"
+import { NexumDialog } from "./nexum-dialog"
+import { searchSessions } from "@/lib/session-utils"
 import { MessageSquare, PanelLeftClose, Plus, Trash2, X, Sliders, Search, Pencil, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -137,11 +137,11 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
       {/* Sidebar Footer with Backdrop Configuration Button */}
       <div className="p-3 border-t border-border bg-background/40">
-        <AgentConfigDialog
+        <NexumDialog
           trigger={
             <Button variant="outline" size="sm" className="w-full justify-center gap-1.5 text-xs h-8 bg-background shadow-xs hover:bg-muted">
               <Sliders className="h-3.5 w-3.5 text-emerald-500" />
-              <span>Configure Agent & Memory</span>
+              <span>Nexum capabilities</span>
             </Button>
           }
         />

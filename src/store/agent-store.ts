@@ -1,17 +1,39 @@
 "use client"
 
 import { create } from "zustand"
-import type {
-  AgentConfig, AgentMemoryItem, AgentMessage, ChatSession, CustomTool,
-  LlmProvider, ModelOption, ProviderApiKey, TraceStep, McpServerConfig
-} from "@/lib/agent-types"
-import { AVAILABLE_MODELS, DEFAULT_CONFIG } from "@/lib/agent-types"
+import type { AgentConfig, AgentMessage, ChatSession, InteractionStep, TraceStep } from "@/lib/agent-types"
+import { DEFAULT_CONFIG } from "@/lib/agent-types"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
-import { parseLearnCommand, generateSessionTitle } from "@/lib/memory-engine"
-import { mcpServerSlug } from "@/lib/mcp/types"
+import { generateSessionTitle } from "@/lib/session-utils"
+import { migrateStoredConfig } from "@/lib/stored-config"
+import type { NexumCapabilities } from "@/lib/nexum"
 
 const STORAGE_KEY = "agentic_chat_sessions_v2"
 const CONFIG_KEY = "agentic_chat_config_v2"
+
+// Aborting the /api/agent fetch is how Stop works: the route sees the disconnect and cancels the Nexum run.
+let activeAbort: AbortController | null = null
+
+function patchInteractionStep(
+  messages: AgentMessage[],
+  messageId: string,
+  match: (step: InteractionStep) => boolean,
+  patch: Partial<InteractionStep>,
+): AgentMessage[] {
+  return messages.map((m) =>
+    m.id !== messageId
+      ? m
+      : { ...m, trace: m.trace?.map((t) => (t.kind === "interaction" && match(t) ? { ...t, ...patch } : t)) },
+  )
+}
+
+/** Interactions still pending when a run ends can no longer be answered. */
+function closePendingInteractions(messages: AgentMessage[], messageId: string): AgentMessage[] {
+  return patchInteractionStep(messages, messageId, (t) => t.status === "pending", {
+    status: "completed",
+    finishedAt: Date.now(),
+  })
+}
 
 interface AgentState {
   sessions: ChatSession[]
@@ -19,37 +41,23 @@ interface AgentState {
   messages: AgentMessage[]
   isRunning: boolean
   activeMessageId: string | null
-  speed: number
+  /** The Nexum run the current turn is streaming; needed to answer its interactions. */
+  activeRunId: string | null
+  /** What the Nexum server reports it can do; null until loaded or while it is unreachable. */
+  capabilities: NexumCapabilities | null
+  capabilitiesError: string | null
   config: AgentConfig
   sidebarCollapsed: boolean
   rightPanelCollapsed: boolean
-  models: ModelOption[]
-  isLoadingModels: boolean
-  isLiveModels: boolean
   hydrated: boolean
 
   // Actions
   hydrateFromStorage: () => void
-  loadModels: (provider?: LlmProvider, baseUrl?: string, apiKey?: string) => Promise<void>
   sendUserMessage: (text: string) => Promise<void>
-  setSpeed: (s: number) => void
+  stopRun: () => void
+  loadCapabilities: () => Promise<void>
+  resolveInteraction: (stepId: string, resolution: { approved?: boolean; selectedId?: string }) => Promise<void>
   updateConfig: (partial: Partial<AgentConfig>) => void
-  addApiKey: (key: string, label: string) => void
-  removeApiKey: (id: string) => void
-  toggleTool: (name: string) => void
-  saveCustomTool: (tool: CustomTool) => void
-  deleteCustomTool: (id: string) => void
-  toggleCustomTool: (id: string) => void
-  addMemory: (item: Omit<AgentMemoryItem, "id" | "createdAt" | "updatedAt">) => void
-  updateMemory: (id: string, partial: Partial<AgentMemoryItem>) => void
-  deleteMemory: (id: string) => void
-  toggleMemory: (id: string) => void
-  // MCP server management
-  addMcpServer: (server: Omit<McpServerConfig, "id">) => void
-  updateMcpServer: (id: string, partial: Partial<McpServerConfig>) => void
-  removeMcpServer: (id: string) => void
-  toggleMcpServer: (id: string) => void
-  resetConfig: () => void
   setSidebarCollapsed: (v: boolean) => void
   toggleSidebar: () => void
   toggleRightPanel: () => void
@@ -71,9 +79,6 @@ const initialWelcomeMessage: AgentMessage = {
   finishedAt: 1700000000000,
   iterations: 0,
   totalTokens: 0,
-  modelId: DEFAULT_CONFIG.modelId,
-  systemPrompt: DEFAULT_CONFIG.systemPrompt,
-  provider: DEFAULT_CONFIG.provider,
   trace: [
     {
       id: "welcome_answer",
@@ -83,7 +88,7 @@ const initialWelcomeMessage: AgentMessage = {
       startedAt: 1700000000000,
       finishedAt: 1700000000000,
       content:
-        "👋 Welcome to the **Agentic ReAct Runtime**.\n\nConnected directly to real LLM providers (**Ollama Local**, **Ollama Cloud**, **OpenAI**, **Groq**, etc.) with live tool execution.\n\n- **Ollama Local**: Zero API key needed.\n- **Ollama Cloud & Cloud Providers**: Multiple API key management.\n- **Live WebSocket Streams**: Real-time tick streams for Binance USD-M & Indian markets.\n- **Long-Term Memory & Learning**: Remembers trading facts, user preferences, and learned corrections (`/learn`).",
+        "👋 Welcome. This chat runs on a **Nexum** agent: plans, tool calls, approvals and results appear here as they happen, and anything that needs your go-ahead pauses the run until you answer.\n\nThe runtime panel lists the tools, skills and models the connected server offers.",
     },
   ],
 }
@@ -102,103 +107,30 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   messages: [initialWelcomeMessage],
   isRunning: false,
   activeMessageId: null,
-  speed: 1,
+  activeRunId: null,
+  capabilities: null,
+  capabilitiesError: null,
   config: DEFAULT_CONFIG,
   sidebarCollapsed: false,
   rightPanelCollapsed: false,
-  models: AVAILABLE_MODELS.filter((m) => m.provider === DEFAULT_CONFIG.provider),
-  isLoadingModels: false,
-  isLiveModels: false,
   hydrated: false,
 
   hydrateFromStorage: () => {
     if (typeof window === "undefined" || get().hydrated) return
     try {
       const savedSessions = localStorage.getItem(STORAGE_KEY)
-      const savedConfig = localStorage.getItem(CONFIG_KEY)
-      // Shallow-merge saved config over defaults, then backfill any nested
-      // arrays/objects that the saved config might be missing (e.g. an old
-      // localStorage entry from before MCP was added).
-      const parsed = savedConfig ? { ...DEFAULT_CONFIG, ...JSON.parse(savedConfig) } : { ...DEFAULT_CONFIG }
-      // Migrate old cached prop-trading prompt to the new intent-first prompt
-      if (parsed.systemPrompt?.includes("systematic prop trading ReAct agent")) {
-        parsed.systemPrompt = DEFAULT_CONFIG.systemPrompt
-      }
-      // Migrate the intent-first default prompt forward to pick up new Mermaid diagram guidance
-      if (parsed.systemPrompt?.includes("INTENT DETECTION & WORKFLOW") && !parsed.systemPrompt?.includes("DIAGRAMS:")) {
-        parsed.systemPrompt = DEFAULT_CONFIG.systemPrompt
-      }
-      // Ollama Cloud provider selected but still pointing at a local-only model
-      // (stale from before Cloud model support was added) — bump to Gemma 4 31B.
-      if (parsed.provider === "ollama_cloud" && parsed.modelId === "llama3.2:3b") {
-        parsed.modelId = "gemma4:31b"
-      }
-      // Migrate deprecated api.ollama.com URL to direct ollama.com URL
-      if (parsed.apiBaseUrl?.includes("api.ollama.com")) {
-        parsed.apiBaseUrl = parsed.apiBaseUrl.replace("api.ollama.com", "ollama.com")
-      }
-      parsed.mcpServers = parsed.mcpServers && Array.isArray(parsed.mcpServers)
-        ? parsed.mcpServers
-        : (DEFAULT_CONFIG.mcpServers || [])
-      parsed.memories = parsed.memories || DEFAULT_CONFIG.memories || []
-      parsed.customTools = parsed.customTools || DEFAULT_CONFIG.customTools || []
-      parsed.apiKeys = parsed.apiKeys || DEFAULT_CONFIG.apiKeys || []
-      parsed.enabledTools = parsed.enabledTools || { ...DEFAULT_CONFIG.enabledTools }
-      parsed.dhan = { ...DEFAULT_CONFIG.dhan, ...(parsed.dhan || {}) }
-      parsed.binance = { ...DEFAULT_CONFIG.binance, ...(parsed.binance || {}) }
-      // Backfill openuiEnabled for configs saved before OpenUI integration
-      // landed. Defaults to false (off) so existing users see no behavior
-      // change until they explicitly opt in via the OpenUI tab.
-      if (typeof parsed.openuiEnabled !== "boolean") {
-        parsed.openuiEnabled = false
-      }
+      const { config, rewrite } = migrateStoredConfig(localStorage.getItem(CONFIG_KEY))
+      if (rewrite) localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
 
       const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [defaultSession]
       const activeId = parsedSessions[0]?.id || initialSessionId
       const activeMsgs = parsedSessions[0]?.messages || [initialWelcomeMessage]
 
-      set({
-        sessions: parsedSessions,
-        activeSessionId: activeId,
-        messages: activeMsgs,
-        config: parsed,
-        hydrated: true,
-      })
-      get().loadModels(parsed.provider, parsed.apiBaseUrl, parsed.apiKey)
+      set({ sessions: parsedSessions, activeSessionId: activeId, messages: activeMsgs, config, hydrated: true })
     } catch {
       set({ hydrated: true })
     }
   },
-
-  loadModels: async (providerOverride, baseUrlOverride, apiKeyOverride) => {
-    const provider = providerOverride || get().config.provider
-    const apiBaseUrl = baseUrlOverride !== undefined ? baseUrlOverride : get().config.apiBaseUrl
-    const apiKey = apiKeyOverride !== undefined ? apiKeyOverride : get().config.apiKey
-
-    set({ isLoadingModels: true })
-    try {
-      const params = new URLSearchParams({ provider, apiBaseUrl, apiKey })
-      const res = await fetch(`/api/models?${params.toString()}`)
-      if (res.ok) {
-        const data = await res.json()
-        const fetchedList: ModelOption[] = data.models || []
-        const currentModel = get().config.modelId
-        const hasCurrent = fetchedList.some((m) => m.id === currentModel)
-        const nextModel = hasCurrent ? currentModel : fetchedList[0]?.id || currentModel
-
-        set({ models: fetchedList, isLiveModels: Boolean(data.isLive), isLoadingModels: false })
-        if (nextModel !== currentModel) get().updateConfig({ modelId: nextModel })
-        return
-      }
-    } catch {
-      // Fallback
-    }
-
-    const fallback = AVAILABLE_MODELS.filter((m) => m.provider === provider)
-    set({ models: fallback.length > 0 ? fallback : AVAILABLE_MODELS, isLoadingModels: false, isLiveModels: false })
-  },
-
-  setSpeed: (s) => set({ speed: s }),
 
   updateConfig: (partial) => {
     set((s) => {
@@ -206,133 +138,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (typeof window !== "undefined") localStorage.setItem(CONFIG_KEY, JSON.stringify(nextConfig))
       return { config: nextConfig }
     })
-    if (partial.provider || partial.apiBaseUrl !== undefined || partial.apiKey !== undefined) {
-      get().loadModels(partial.provider, partial.apiBaseUrl, partial.apiKey)
-    }
-  },
-
-  addApiKey: (key, label) => {
-    const provider = get().config.provider
-    const newKey: ProviderApiKey = { id: `key_${Date.now()}`, label: label || `Key (${provider})`, key, provider, createdAt: Date.now() }
-    const updated = [...(get().config.apiKeys || []), newKey]
-    // Ollama Cloud unlocks much larger models than the local default — once a
-    // key is configured, jump straight to Gemma 4 31B instead of leaving the
-    // 3B local model selected under the cloud provider.
-    const modelOverride = provider === "ollama_cloud" ? { modelId: "gemma4:31b" } : {}
-    get().updateConfig({ apiKeys: updated, apiKey: key, ...modelOverride })
-  },
-
-  removeApiKey: (id) => {
-    const updated = (get().config.apiKeys || []).filter((k) => k.id !== id)
-    const activeKey = get().config.apiKey === id ? updated[0]?.key || "" : get().config.apiKey
-    get().updateConfig({ apiKeys: updated, apiKey: activeKey })
-  },
-
-  toggleTool: (name) => {
-    get().updateConfig({ enabledTools: { ...get().config.enabledTools, [name]: get().config.enabledTools[name] === false } })
-  },
-
-  saveCustomTool: (tool) => {
-    const updated = [...(get().config.customTools || []).filter((t) => t.id !== tool.id), tool]
-    get().updateConfig({ customTools: updated })
-  },
-
-  deleteCustomTool: (id) => {
-    const updated = (get().config.customTools || []).filter((t) => t.id !== id)
-    get().updateConfig({ customTools: updated })
-  },
-
-  toggleCustomTool: (id) => {
-    const updated = (get().config.customTools || []).map((t) => (t.id === id ? { ...t, enabled: !t.enabled } : t))
-    get().updateConfig({ customTools: updated })
-  },
-
-  addMemory: (item) => {
-    const newMem: AgentMemoryItem = {
-      id: `mem_${Date.now()}`,
-      category: item.category,
-      title: item.title,
-      content: item.content,
-      source: item.source || "user",
-      enabled: item.enabled !== false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
-    const updated = [newMem, ...(get().config.memories || [])]
-    get().updateConfig({ memories: updated })
-  },
-
-  updateMemory: (id, partial) => {
-    const updated = (get().config.memories || []).map((m) =>
-      m.id === id ? { ...m, ...partial, updatedAt: Date.now() } : m
-    )
-    get().updateConfig({ memories: updated })
-  },
-
-  deleteMemory: (id) => {
-    const updated = (get().config.memories || []).filter((m) => m.id !== id)
-    get().updateConfig({ memories: updated })
-  },
-
-  toggleMemory: (id) => {
-    const updated = (get().config.memories || []).map((m) =>
-      m.id === id ? { ...m, enabled: !m.enabled, updatedAt: Date.now() } : m
-    )
-    get().updateConfig({ memories: updated })
-  },
-
-  // ── MCP server management ───────────────────────────────────────────
-  addMcpServer: (server) => {
-    const newServer: McpServerConfig = {
-      ...server,
-      id: `mcp_${Date.now()}_${mcpServerSlug(server.name || "server")}`,
-    }
-    const updated = [...(get().config.mcpServers || []), newServer]
-    get().updateConfig({ mcpServers: updated })
-  },
-
-  updateMcpServer: (id, partial) => {
-    const updated = (get().config.mcpServers || []).map((s) =>
-      s.id === id ? { ...s, ...partial } : s
-    )
-    get().updateConfig({ mcpServers: updated })
-  },
-
-  removeMcpServer: (id) => {
-    const updated = (get().config.mcpServers || []).filter((s) => s.id !== id)
-    get().updateConfig({ mcpServers: updated })
-  },
-
-  toggleMcpServer: (id) => {
-    const updated = (get().config.mcpServers || []).map((s) =>
-      s.id === id ? { ...s, enabled: !s.enabled } : s
-    )
-    get().updateConfig({ mcpServers: updated })
-  },
-
-  resetConfig: () => {
-    // Deep-copy nested objects so DEFAULT_CONFIG is never mutated by later
-    // updateConfig calls (which would otherwise leak user edits back into the
-    // defaults used by future resetConfig() calls).
-    set({
-      config: {
-        ...DEFAULT_CONFIG,
-        enabledTools: { ...DEFAULT_CONFIG.enabledTools },
-        apiKeys: [...(DEFAULT_CONFIG.apiKeys || [])],
-        customTools: [...(DEFAULT_CONFIG.customTools || [])],
-        memories: (DEFAULT_CONFIG.memories || []).map((m) => ({ ...m })),
-        dhan: { ...DEFAULT_CONFIG.dhan },
-        binance: { ...DEFAULT_CONFIG.binance },
-        mcpServers: (DEFAULT_CONFIG.mcpServers || []).map((s) => ({
-          ...s,
-          args: s.args ? [...s.args] : undefined,
-          env: s.env ? { ...s.env } : undefined,
-          headers: s.headers ? { ...s.headers } : undefined,
-        })),
-      },
-    })
-    if (typeof window !== "undefined") localStorage.removeItem(CONFIG_KEY)
-    get().loadModels(DEFAULT_CONFIG.provider, DEFAULT_CONFIG.apiBaseUrl, DEFAULT_CONFIG.apiKey)
   },
 
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
@@ -389,6 +194,40 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     })
   },
 
+  stopRun: () => activeAbort?.abort(),
+
+  loadCapabilities: async () => {
+    try {
+      const res = await fetch("/api/capabilities")
+      const json = (await res.json()) as { ok: boolean; capabilities?: NexumCapabilities; error?: string }
+      if (!json.ok || !json.capabilities) throw new Error(json.error ?? `Request failed (${res.status})`)
+      set({ capabilities: json.capabilities, capabilitiesError: null })
+    } catch (err: unknown) {
+      set({ capabilities: null, capabilitiesError: err instanceof Error ? err.message : String(err) })
+    }
+  },
+
+  resolveInteraction: async (stepId, resolution) => {
+    const { activeRunId, activeMessageId, messages } = get()
+    const step = messages.find((m) => m.id === activeMessageId)?.trace?.find((t) => t.id === stepId)
+    if (!activeRunId || !activeMessageId || step?.kind !== "interaction") return
+
+    const patch = (fields: Partial<InteractionStep>) =>
+      set((s) => ({ messages: patchInteractionStep(s.messages, activeMessageId, (t) => t.id === stepId, fields) }))
+    patch({ status: "running", error: undefined })
+    try {
+      const res = await fetch("/api/agent/interactions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: activeRunId, interactionId: step.interactionId, ...resolution }),
+      })
+      const json = (await res.json()) as { ok: boolean; error?: string }
+      // On success the stream's *.resolved event completes the step; on failure let the user retry.
+      if (!json.ok) patch({ status: "pending", error: json.error ?? `Request failed (${res.status})` })
+    } catch (err: unknown) {
+      patch({ status: "pending", error: err instanceof Error ? err.message : String(err) })
+    }
+  },
+
   sendUserMessage: async (text) => {
     if (get().isRunning) return
     const { config, activeSessionId, sessions } = get()
@@ -396,82 +235,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const isDefaultTitle = !currentSession?.title || currentSession.title === "New Chat" || currentSession.title === "Initial Session" || currentSession.title.startsWith("sess_")
     const sessionTitle = isDefaultTitle ? generateSessionTitle(text) : currentSession.title
 
-    // Handle /learn command directly
-    const learnInfo = parseLearnCommand(text)
-    if (learnInfo) {
-      get().addMemory({
-        category: learnInfo.category,
-        title: learnInfo.title,
-        content: learnInfo.content,
-        source: "user",
-        enabled: true,
-      })
-      const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
-      const agentMsg: AgentMessage = {
-        id: `a_${Date.now()}`,
-        role: "agent",
-        query: text,
-        trace: [
-          {
-            id: `step_${Date.now()}`,
-            kind: "answer",
-            status: "completed",
-            iteration: 1,
-            startedAt: Date.now(),
-            finishedAt: Date.now(),
-            content: `🧠 **Learned & Saved to Agent Memory!**\n\n- **Category**: \`${learnInfo.category}\`\n- **Title**: ${learnInfo.title}\n- **Pattern**: "${learnInfo.content}"\n\nI will remember this context and automatically apply it in all future reasoning turns.`,
-          },
-        ],
-        status: "completed",
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        iterations: 1,
-        totalTokens: 0,
-      }
-      const updatedMsgs = [...get().messages, userMsg, agentMsg]
-      const updatedSessions = sessions.map((s) => (s.id === activeSessionId ? { ...s, title: sessionTitle, messages: updatedMsgs, updatedAt: Date.now() } : s))
-      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSessions))
-      set({ messages: updatedMsgs, sessions: updatedSessions })
-      return
-    }
-
     const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
     const agentMsgId = `a_${Date.now()}`
     const agentMsg: AgentMessage = {
       id: agentMsgId, role: "agent", query: text, trace: [], status: "running", startedAt: Date.now(),
-      iterations: 0, totalTokens: 0, modelId: config.modelId, systemPrompt: config.systemPrompt,
-      temperature: config.temperature, maxIterations: config.maxIterations, provider: config.provider,
+      iterations: 0, totalTokens: 0,
     }
-
-    const history = get().messages
-      .filter((m) => m.id !== userMsg.id && m.id !== agentMsgId)
-      .map((m) => {
-        if (m.role === "user") {
-          return { role: "user" as const, content: m.content || "" }
-        }
-        const answer = m.trace?.find((t) => t.kind === "answer")?.content || m.content || ""
-        return { role: "assistant" as const, content: answer }
-      })
-      .filter((m) => m.content.trim().length > 0)
-      .slice(-10)
 
     const initialMsgs = [...get().messages, userMsg, agentMsg]
     const initialSessions = sessions.map((sess) => (sess.id === activeSessionId ? { ...sess, title: sessionTitle, messages: initialMsgs, updatedAt: Date.now() } : sess))
     if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(initialSessions))
 
-    set({ messages: initialMsgs, sessions: initialSessions, isRunning: true, activeMessageId: agentMsgId })
+    set({ messages: initialMsgs, sessions: initialSessions, isRunning: true, activeMessageId: agentMsgId, activeRunId: null })
+    const abort = new AbortController()
+    activeAbort = abort
 
     let currentIter = 1
     let tokens = 0
 
     try {
       const res = await fetch("/api/agent", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text, history, config, customTools: config.customTools, nexumSessionId: currentSession?.nexumSessionId }),
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
+        body: JSON.stringify({ query: text, presentation: config.presentation, nexumSessionId: currentSession?.nexumSessionId }),
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
 
-      // When routed through a Nexum host (NEXUM_HOST_URL), the server hands
+      // When routed through Nexum (the default; not in legacy mode), the server hands
       // back the session it ran this turn against — persist it so the next
       // turn in this chat reuses the same Nexum session instead of minting
       // a fresh one (route.ts's X-Nexum-Session-Id header).
@@ -505,6 +294,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
           try {
             const parsed = JSON.parse(rawData)
+            if (parsed.kind === "run") {
+              set({ activeRunId: parsed.runId })
+              continue
+            }
+            if (parsed.kind === "interaction_resolved") {
+              set((s) => ({
+                messages: patchInteractionStep(s.messages, agentMsgId, (t) => t.interactionId === parsed.interactionId, {
+                  status: "completed",
+                  finishedAt: Date.now(),
+                  resolution: parsed.resolution,
+                  error: undefined,
+                }),
+              }))
+              continue
+            }
             currentIter = parsed.iteration || currentIter
             tokens += (parsed.tokensIn || 0) + (parsed.tokensOut || 0)
 
@@ -538,29 +342,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
 
       set((s) => {
-        const msgs = s.messages.map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now() } : m))
+        const msgs = closePendingInteractions(s.messages, agentMsgId).map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now() } : m))
         const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, title: sessionTitle, messages: msgs, updatedAt: Date.now() } : sess))
         if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        return { messages: msgs, isRunning: false, activeMessageId: null, sessions: updated }
+        return { messages: msgs, isRunning: false, activeMessageId: null, activeRunId: null, sessions: updated }
       })
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err)
+      const stoppedByUser = abort.signal.aborted
       set((s) => {
-        const msgs = s.messages.map((m) => {
+        const msgs = closePendingInteractions(s.messages, agentMsgId).map((m) => {
           if (m.id !== agentMsgId) return m
-          const errStep: TraceStep = {
+          const endStep: TraceStep = {
             id: `err_${Date.now()}`,
             kind: "answer",
-            status: "error",
+            status: stoppedByUser ? "completed" : "error",
             iteration: currentIter,
             startedAt: Date.now(),
             finishedAt: Date.now(),
-            content: `⚠️ **Agent Execution Error**: ${errorMsg}`,
+            content: stoppedByUser ? "⚠️ Run cancelled." : `⚠️ **Agent Execution Error**: ${errorMsg}`,
           }
-          return { ...m, trace: [...(m.trace || []), errStep], status: "error" as const, finishedAt: Date.now() }
+          return { ...m, trace: [...(m.trace || []), endStep], status: stoppedByUser ? ("completed" as const) : ("error" as const), finishedAt: Date.now() }
         })
-        return { messages: msgs, isRunning: false, activeMessageId: null }
+        return { messages: msgs, isRunning: false, activeMessageId: null, activeRunId: null }
       })
+    } finally {
+      if (activeAbort === abort) activeAbort = null
     }
   },
 }))
