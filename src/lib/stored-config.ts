@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, type AgentConfig } from "./agent-types"
+import { APPROVAL_MODES, DEFAULT_CONFIG, type AgentConfig } from "./agent-types"
 import { PRESENTATION_MODES } from "./presentation"
 
 /**
@@ -19,7 +19,8 @@ export function migrateStoredConfig(saved: string | null): { config: AgentConfig
     return { config: { ...DEFAULT_CONFIG }, rewrite: true }
   }
 
-  const config: AgentConfig = { presentation: presentationOf(stored) }
+  const approvalMode = APPROVAL_MODES.find((m) => m === stored.approvalMode) ?? DEFAULT_CONFIG.approvalMode
+  const config: AgentConfig = { presentation: presentationOf(stored), approvalMode }
   return { config, rewrite: saved !== JSON.stringify(config) }
 }
 

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { buildNexumOpenUIOffer } from "@/lib/openui/prompt"
-import { NexumClient, NexumHttpError, type CreateRunParams, type PresentationMode } from "@/lib/nexum"
+import { NexumClient, NexumHttpError, type ApprovalMode, type CreateRunParams, type PresentationMode } from "@/lib/nexum"
+import { APPROVAL_MODES } from "@/lib/agent-types"
 import { createNexumSession, nexumHostUrl } from "@/lib/nexum-client"
 import { newTurnState, translateNexumEvent, type NexumEvent } from "@/lib/nexum/wire"
 
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest) {
     query?: unknown
     /** How much generated UI the user wants; Nexum decides each answer's actual format. */
     presentation?: PresentationMode
+    approvalMode?: ApprovalMode
     /** The Nexum session from a prior turn in this chat, if one exists; reused so
      * the conversation stays continuous on the Nexum side. */
     nexumSessionId?: string
@@ -84,6 +86,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: false, error: "`query` must be a non-empty string" }, { status: 400 })
   }
   const { query, presentation = "auto", nexumSessionId } = body as typeof body & { query: string }
+  const approvalMode = APPROVAL_MODES.find((m) => m === body.approvalMode) ?? "ask"
 
   // Resolved (or created) BEFORE the stream starts, not inside it, so it
   // can ride back to the client as a response header — src/store/agent-store.ts
@@ -114,6 +117,7 @@ export async function POST(req: NextRequest) {
         const runParams: CreateRunParams = {
           goal: query,
           interactive: true,
+          approvalMode,
           presentation: { mode: presentation, ...(presentation === "markdown" ? {} : { openui: buildNexumOpenUIOffer() }) },
         }
         await runViaNexum(send, nexumUrl, resolvedNexumSessionId, runParams, disconnected.signal)

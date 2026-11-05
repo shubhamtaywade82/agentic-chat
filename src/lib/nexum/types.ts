@@ -53,12 +53,16 @@ export interface NexumRun {
   finishedAt?: number;
 }
 
+/** Which confirmations a run answers itself: none, workspace file edits, or everything (policy denials still apply). */
+export type ApprovalMode = "ask" | "auto-edit" | "yolo";
+
 export interface CreateRunParams {
   goal: string;
   strategy?: string;
   presentation?: PresentationRequest;
   /** This client shows approvals/clarifications to the user; otherwise Nexum denies/skips them. */
   interactive?: boolean;
+  approvalMode?: ApprovalMode;
   timeoutMs?: number;
 }
 

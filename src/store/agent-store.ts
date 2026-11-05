@@ -261,7 +261,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const res = await fetch("/api/agent", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
-        body: JSON.stringify({ query: text, presentation: config.presentation, nexumSessionId: currentSession?.nexumSessionId }),
+        body: JSON.stringify({
+          query: text,
+          presentation: config.presentation,
+          approvalMode: config.approvalMode,
+          nexumSessionId: currentSession?.nexumSessionId,
+        }),
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
 

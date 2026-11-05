@@ -12,14 +12,14 @@ const legacy = JSON.stringify({
 
 describe("migrateStoredConfig", () => {
   it("should default to auto for a browser with nothing stored", () => {
-    expect(migrateStoredConfig(null)).toEqual({ config: { presentation: "auto" }, rewrite: false })
+    expect(migrateStoredConfig(null)).toEqual({ config: { presentation: "auto", approvalMode: "ask" }, rewrite: false })
   })
 
   it("should drop credentials from an old config and ask for the stored copy to be rewritten", () => {
     const { config, rewrite } = migrateStoredConfig(legacy)
 
     expect(JSON.stringify(config)).not.toContain("SECRET")
-    expect(config).toEqual({ presentation: "auto" })
+    expect(config).toEqual({ presentation: "auto", approvalMode: "ask" })
     expect(rewrite).toBe(true)
   })
 
@@ -31,14 +31,19 @@ describe("migrateStoredConfig", () => {
   })
 
   it("should keep a valid presentation and leave an already-clean config alone", () => {
-    expect(migrateStoredConfig('{"presentation":"openui"}')).toEqual({ config: { presentation: "openui" }, rewrite: false })
+    const clean = '{"presentation":"openui","approvalMode":"auto-edit"}'
+    expect(migrateStoredConfig(clean)).toEqual({ config: { presentation: "openui", approvalMode: "auto-edit" }, rewrite: false })
   })
 
   it("should ignore an unknown presentation value", () => {
     expect(migrateStoredConfig('{"presentation":"holographic"}').config.presentation).toBe("auto")
   })
 
+  it("should fall back to ask for an unknown approval mode", () => {
+    expect(migrateStoredConfig('{"approvalMode":"everything"}').config.approvalMode).toBe("ask")
+  })
+
   it("should recover from corrupt storage", () => {
-    expect(migrateStoredConfig("{not json")).toEqual({ config: { presentation: "auto" }, rewrite: true })
+    expect(migrateStoredConfig("{not json")).toEqual({ config: { presentation: "auto", approvalMode: "ask" }, rewrite: true })
   })
 })

@@ -1,6 +1,6 @@
 // Core types for chat sessions and the run trace the UI renders
 
-import type { PresentationMode } from "@/lib/nexum"
+import type { ApprovalMode, PresentationMode } from "@/lib/nexum"
 
 export type StepStatus = "pending" | "running" | "completed" | "error"
 
@@ -108,7 +108,11 @@ export interface AgentMessage {
 export interface AgentConfig {
   /** How much generated UI (OpenUI) the user wants; Nexum decides each answer's format. See docs/openui-integration.md. */
   presentation: PresentationMode
+  /** Which confirmations the agent may skip; see ApprovalMode. */
+  approvalMode: ApprovalMode
 }
+
+export const APPROVAL_MODES: readonly ApprovalMode[] = ["ask", "auto-edit", "yolo"]
 
 export interface ChatSession {
   id: string
@@ -123,4 +127,5 @@ export interface ChatSession {
 
 export const DEFAULT_CONFIG: AgentConfig = {
   presentation: "auto",
+  approvalMode: "ask",
 }

@@ -10,15 +10,21 @@ import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
 import { NexumDialog } from "./nexum-dialog"
 import { PRESENTATION_LABELS, PRESENTATION_MODES, serverSupportsOpenUI } from "@/lib/presentation"
-import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard } from "lucide-react"
+import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard, ShieldCheck, FilePen, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { DEFAULT_CONFIG } from "@/lib/agent-types"
+import { APPROVAL_MODES, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { cn } from "@/lib/utils"
 
 const emptySubscribe = () => () => {}
+
+const APPROVAL_LABELS = {
+  ask: { label: "Ask", icon: ShieldCheck, description: "Ask before file edits, deletes, destructive shell commands and publishing." },
+  "auto-edit": { label: "Auto-edit", icon: FilePen, description: "File edits run without asking; other risky actions still ask." },
+  yolo: { label: "YOLO", icon: ShieldAlert, description: "Everything runs without asking (policy denials still apply). Use only on throwaway work." },
+} as const
 
 export function AgentChat() {
   const isMounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
@@ -38,6 +44,12 @@ export function AgentChat() {
   const toggleRightPanel = useAgentStore((s) => s.toggleRightPanel)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  const cycleApprovalMode = () => {
+    const mode = config.approvalMode
+    updateConfig({ approvalMode: APPROVAL_MODES[(APPROVAL_MODES.indexOf(mode) + 1) % APPROVAL_MODES.length] })
+  }
+  const approval = APPROVAL_LABELS[config.approvalMode]
 
   const cyclePresentation = () => {
     const modes = PRESENTATION_MODES.filter((m) => m !== "openui" || openuiSupported)
@@ -117,6 +129,22 @@ export function AgentChat() {
             <LayoutDashboard className="h-3 w-3" />
             <span className="hidden md:inline">UI:</span>
             <span>{PRESENTATION_LABELS[config.presentation].label}</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={cycleApprovalMode}
+            className={cn(
+              "h-7 gap-1.5 px-2 text-xs font-mono transition",
+              config.approvalMode === "yolo" && "border-red-500/60 bg-red-500/10 text-red-600 dark:text-red-400 font-semibold",
+              config.approvalMode === "auto-edit" && "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+            )}
+            title={`Approvals: ${approval.description} Click to change.`}
+          >
+            <approval.icon className="h-3 w-3" />
+            <span className="hidden md:inline">Approvals:</span>
+            <span>{approval.label}</span>
           </Button>
 
           <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
