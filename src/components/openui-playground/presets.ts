@@ -53,4 +53,16 @@ export const OPENUI_PRESETS: OpenUIPreset[] = [
   Markdown("**Next step:** review the migration plan, then deploy.")
 ])`,
   },
+  {
+    id: "singleton-vs-factory",
+    name: "Singleton vs Factory",
+    description: "Small table comparing Singleton and Factory design patterns",
+    code: `root = Stack("md", [
+  Text("Singleton vs Factory", "heading"),
+  Table(["Pattern", "Intent", "When to use"], [
+    ["Singleton", "One shared instance for everyone", "Global config / state"],
+    ["Factory", "Create objects without exposing the concrete class", "Need different implementations"]
+  ])
+])`,
+  },
 ]

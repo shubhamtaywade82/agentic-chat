@@ -14,7 +14,11 @@ import { nexumHostUrl } from "@/lib/nexum-client"
  * Response: `{ ok: true, data: unknown } | { ok: false, error: string }`
  */
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as { tool?: unknown; args?: Record<string, unknown>; nexumSessionId?: unknown }
+  const body = ((await req.json().catch(() => null)) ?? {}) as {
+    tool?: unknown
+    args?: Record<string, unknown>
+    nexumSessionId?: unknown
+  }
   if (typeof body.tool !== "string" || !body.tool) {
     return NextResponse.json({ ok: false, error: "Missing `tool` field" }, { status: 400 })
   }

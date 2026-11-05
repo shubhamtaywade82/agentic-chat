@@ -71,14 +71,19 @@ async function runViaNexum(
 }
 
 export async function POST(req: NextRequest) {
-  const { query, presentation = "auto", nexumSessionId } = (await req.json()) as {
-    query: string
+  const body = (await req.json().catch(() => null)) as {
+    query?: unknown
     /** How much generated UI the user wants; Nexum decides each answer's actual format. */
     presentation?: PresentationMode
     /** The Nexum session from a prior turn in this chat, if one exists; reused so
      * the conversation stays continuous on the Nexum side. */
     nexumSessionId?: string
+  } | null
+  // Rejected before a Nexum session is created, so a bad request leaves nothing behind on the server.
+  if (typeof body?.query !== "string" || !body.query.trim()) {
+    return Response.json({ ok: false, error: "`query` must be a non-empty string" }, { status: 400 })
   }
+  const { query, presentation = "auto", nexumSessionId } = body as typeof body & { query: string }
 
   // Resolved (or created) BEFORE the stream starts, not inside it, so it
   // can ride back to the client as a response header — src/store/agent-store.ts

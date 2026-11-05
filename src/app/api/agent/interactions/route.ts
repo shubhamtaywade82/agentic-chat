@@ -11,7 +11,7 @@ import { nexumHostUrl } from "@/lib/nexum-client"
  * Response: `{ ok: true } | { ok: false, error: string }`
  */
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as {
+  const body = ((await req.json().catch(() => null)) ?? {}) as {
     runId?: unknown
     interactionId?: unknown
     approved?: unknown
