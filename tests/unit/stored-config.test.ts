@@ -42,6 +42,10 @@ describe("migrateStoredConfig", () => {
     expect(migrateStoredConfig('{"presentation":"holographic"}').config.presentation).toBe("auto")
   })
 
+  it("should not restore yolo approvals after a reload", () => {
+    expect(migrateStoredConfig('{"approvalMode":"yolo"}').config.approvalMode).toBe("ask")
+  })
+
   it("should fall back to ask for an unknown approval mode", () => {
     expect(migrateStoredConfig('{"approvalMode":"everything"}').config.approvalMode).toBe("ask")
   })

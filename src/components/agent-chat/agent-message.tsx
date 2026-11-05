@@ -4,7 +4,7 @@ import { useState } from "react"
 import { motion } from "framer-motion"
 import {
   Bot, Coins, Repeat, Clock, CheckCircle2, Loader2,
-  ChevronRight, Download, Copy, Check
+  ChevronRight, Download, Copy, Check, RotateCcw
 } from "lucide-react"
 import type { AgentMessage } from "@/lib/agent-types"
 import { TraceStepView } from "./trace-step"
@@ -26,7 +26,8 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
   const running = message.status === "running"
   const totalDuration = message.finishedAt && message.startedAt ? (message.finishedAt - message.startedAt) / 1000 : undefined
   const [copied, setCopied] = useState(false)
-  const { exportTrace } = useAgentStore()
+  const { exportTrace, sendUserMessage, isRunning } = useAgentStore()
+  const canRetry = message.status === "error" && !isRunning && Boolean(message.query)
 
   // Reasoning steps (everything but the final answer) stay expanded while
   // the loop is running so the live ReAct visualization is visible, then
@@ -94,15 +95,21 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
               </span>
             )}
 
+            {canRetry && (
+              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => sendUserMessage(message.query ?? "")}>
+                <RotateCcw className="h-3 w-3" /> Retry
+              </Button>
+            )}
+
             {/* Trace Export Dropdown */}
             {trace.length > 0 && !running && (
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={handleCopyTrace} title="Copy trace markdown">
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={handleCopyTrace} title="Copy trace markdown" aria-label="Copy trace markdown">
                   {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" title="Export trace">
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" title="Export trace" aria-label="Export trace">
                       <Download className="h-3 w-3" />
                     </Button>
                   </DropdownMenuTrigger>

@@ -1,8 +1,9 @@
 "use client"
 
 import { create } from "zustand"
-import type { AgentConfig, AgentMessage, ChatSession, InteractionStep, TraceStep } from "@/lib/agent-types"
+import type { AgentConfig, AgentMessage, ChatSession, TraceStep } from "@/lib/agent-types"
 import { DEFAULT_CONFIG } from "@/lib/agent-types"
+import { applyWireEvent, finishMessage, patchInteraction, readWireEvents } from "@/lib/apply-wire-event"
 import { exportTraceToMarkdown, exportTraceToJson, downloadFile } from "@/lib/trace-exporter"
 import { generateSessionTitle } from "@/lib/session-utils"
 import { migrateStoredConfig } from "@/lib/stored-config"
@@ -10,39 +11,22 @@ import type { NexumCapabilities } from "@/lib/nexum"
 
 const STORAGE_KEY = "agentic_chat_sessions_v2"
 const CONFIG_KEY = "agentic_chat_config_v2"
+const DEFAULT_TITLES = new Set(["New Chat", "Initial Session"])
 
 // Aborting the /api/agent fetch is how Stop works: the route sees the disconnect and cancels the Nexum run.
 let activeAbort: AbortController | null = null
 
-function patchInteractionStep(
-  messages: AgentMessage[],
-  messageId: string,
-  match: (step: InteractionStep) => boolean,
-  patch: Partial<InteractionStep>,
-): AgentMessage[] {
-  return messages.map((m) =>
-    m.id !== messageId
-      ? m
-      : { ...m, trace: m.trace?.map((t) => (t.kind === "interaction" && match(t) ? { ...t, ...patch } : t)) },
-  )
-}
-
-/** Interactions still pending when a run ends can no longer be answered. */
-function closePendingInteractions(messages: AgentMessage[], messageId: string): AgentMessage[] {
-  return patchInteractionStep(messages, messageId, (t) => t.status === "pending", {
-    status: "completed",
-    finishedAt: Date.now(),
-  })
-}
-
 interface AgentState {
   sessions: ChatSession[]
   activeSessionId: string
+  /** The open chat's messages; always the same list as that session's `messages`. */
   messages: AgentMessage[]
   isRunning: boolean
   activeMessageId: string | null
   /** The Nexum run the current turn is streaming; needed to answer its interactions. */
   activeRunId: string | null
+  /** The chat the running turn belongs to — not necessarily the open one, since the user may switch away. */
+  activeRunSessionId: string | null
   /** What the Nexum server reports it can do; null until loaded or while it is unreachable. */
   capabilities: NexumCapabilities | null
   capabilitiesError: string | null
@@ -101,6 +85,42 @@ const defaultSession: ChatSession = {
   messages: [initialWelcomeMessage],
 }
 
+function persist(sessions: ChatSession[]): void {
+  if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+}
+
+/** Rewrites one chat; the visible message list follows when that chat is the open one. */
+function withSession(
+  s: AgentState,
+  sessionId: string,
+  update: (session: ChatSession) => ChatSession,
+): Pick<AgentState, "sessions"> & Partial<Pick<AgentState, "messages">> {
+  const sessions = s.sessions.map((sess) => (sess.id === sessionId ? update(sess) : sess))
+  const updated = sessions.find((sess) => sess.id === sessionId)
+  return s.activeSessionId === sessionId && updated ? { sessions, messages: updated.messages } : { sessions }
+}
+
+function withMessage(s: AgentState, sessionId: string, messageId: string, update: (m: AgentMessage) => AgentMessage) {
+  return withSession(s, sessionId, (sess) => ({
+    ...sess,
+    messages: sess.messages.map((m) => (m.id === messageId ? update(m) : m)),
+  }))
+}
+
+function endStepFor(err: unknown, stoppedByUser: boolean): TraceStep {
+  const now = Date.now()
+  const message = err instanceof Error ? err.message : String(err)
+  return {
+    id: `err_${now}`,
+    kind: "answer",
+    status: stoppedByUser ? "completed" : "error",
+    iteration: 1,
+    startedAt: now,
+    finishedAt: now,
+    content: stoppedByUser ? "⚠️ Run cancelled." : `⚠️ **Could not run this turn**: ${message}`,
+  }
+}
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   sessions: [defaultSession],
   activeSessionId: initialSessionId,
@@ -108,6 +128,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   isRunning: false,
   activeMessageId: null,
   activeRunId: null,
+  activeRunSessionId: null,
   capabilities: null,
   capabilitiesError: null,
   config: DEFAULT_CONFIG,
@@ -150,11 +171,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   toggleRightPanel: () => set((s) => ({ rightPanelCollapsed: !s.rightPanelCollapsed })),
 
   createNewSession: () => {
-    const newId = `sess_${Date.now()}`
+    const newId = `sess_${crypto.randomUUID()}`
     const newSession: ChatSession = { id: newId, title: "New Chat", createdAt: Date.now(), updatedAt: Date.now(), messages: [] }
     set((s) => {
       const sessions = [newSession, ...s.sessions]
-      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+      persist(sessions)
       return { sessions, activeSessionId: newId, messages: [] }
     })
   },
@@ -165,12 +186,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   deleteSession: (id) => {
+    if (get().activeRunSessionId === id) get().stopRun()
     set((s) => {
       const remaining = s.sessions.filter((sess) => sess.id !== id)
       const nextSessions = remaining.length > 0 ? remaining : [{ id: `sess_${Date.now()}`, title: "Initial Session", createdAt: Date.now(), updatedAt: Date.now(), messages: [] }]
-      const nextActiveId = nextSessions[0].id
-      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSessions))
-      return { sessions: nextSessions, activeSessionId: nextActiveId, messages: nextSessions[0].messages }
+      persist(nextSessions)
+      if (id !== s.activeSessionId) return { sessions: nextSessions }
+      return { sessions: nextSessions, activeSessionId: nextSessions[0].id, messages: nextSessions[0].messages }
     })
   },
 
@@ -179,7 +201,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!trimmed) return
     set((s) => {
       const updated = s.sessions.map((sess) => (sess.id === id ? { ...sess, title: trimmed, updatedAt: Date.now() } : sess))
-      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      persist(updated)
       return { sessions: updated }
     })
   },
@@ -191,11 +213,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     else downloadFile(`react-trace-${msg.id}.json`, exportTraceToJson(msg), "application/json")
   },
 
+  // Starts the chat over: the Nexum session is dropped too, or the agent would still remember the cleared turns.
   clear: () => {
+    if (get().activeRunSessionId === get().activeSessionId) get().stopRun()
     set((s) => {
-      const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, messages: [] } : sess))
-      if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-      return { messages: [], isRunning: false, activeMessageId: null, sessions: updated }
+      const next = withSession(s, s.activeSessionId, (sess) => ({ ...sess, title: "New Chat", messages: [], nexumSessionId: undefined }))
+      persist(next.sessions)
+      return next
     })
   },
 
@@ -213,12 +237,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   resolveInteraction: async (stepId, resolution) => {
-    const { activeRunId, activeMessageId, messages } = get()
-    const step = messages.find((m) => m.id === activeMessageId)?.trace?.find((t) => t.id === stepId)
-    if (!activeRunId || !activeMessageId || step?.kind !== "interaction") return
+    const { activeRunId, activeMessageId, activeRunSessionId, sessions } = get()
+    if (!activeRunId || !activeMessageId || !activeRunSessionId) return
+    const message = sessions.find((s) => s.id === activeRunSessionId)?.messages.find((m) => m.id === activeMessageId)
+    const step = message?.trace?.find((t) => t.id === stepId)
+    if (step?.kind !== "interaction") return
 
-    const patch = (fields: Partial<InteractionStep>) =>
-      set((s) => ({ messages: patchInteractionStep(s.messages, activeMessageId, (t) => t.id === stepId, fields) }))
+    const patch = (fields: Parameters<typeof patchInteraction>[2]) =>
+      set((s) => withMessage(s, activeRunSessionId, activeMessageId, (m) => patchInteraction(m, (t) => t.id === stepId, fields)))
     patch({ status: "running", error: undefined })
     try {
       const res = await fetch("/api/agent/interactions", {
@@ -235,29 +261,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   sendUserMessage: async (text) => {
     if (get().isRunning) return
-    const { config, activeSessionId, sessions } = get()
-    const currentSession = sessions.find((s) => s.id === activeSessionId)
-    const isDefaultTitle = !currentSession?.title || currentSession.title === "New Chat" || currentSession.title === "Initial Session" || currentSession.title.startsWith("sess_")
-    const sessionTitle = isDefaultTitle ? generateSessionTitle(text) : currentSession.title
-
-    const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
+    const { config, activeSessionId: runSessionId, sessions } = get()
+    const session = sessions.find((s) => s.id === runSessionId)
+    const title = !session?.title || DEFAULT_TITLES.has(session.title) ? generateSessionTitle(text) : session.title
     const agentMsgId = `a_${Date.now()}`
+    const userMsg: AgentMessage = { id: `u_${Date.now()}`, role: "user", content: text }
     const agentMsg: AgentMessage = {
-      id: agentMsgId, role: "agent", query: text, trace: [], status: "running", startedAt: Date.now(),
-      iterations: 0, totalTokens: 0,
+      id: agentMsgId, role: "agent", query: text, trace: [], status: "running", startedAt: Date.now(), iterations: 0, totalTokens: 0,
     }
 
-    const initialMsgs = [...get().messages, userMsg, agentMsg]
-    const initialSessions = sessions.map((sess) => (sess.id === activeSessionId ? { ...sess, title: sessionTitle, messages: initialMsgs, updatedAt: Date.now() } : sess))
-    if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(initialSessions))
-
-    set({ messages: initialMsgs, sessions: initialSessions, isRunning: true, activeMessageId: agentMsgId, activeRunId: null })
+    set((s) => {
+      const next = withSession(s, runSessionId, (sess) => ({ ...sess, title, messages: [...sess.messages, userMsg, agentMsg], updatedAt: Date.now() }))
+      persist(next.sessions)
+      return { ...next, isRunning: true, activeMessageId: agentMsgId, activeRunId: null, activeRunSessionId: runSessionId }
+    })
     const abort = new AbortController()
     activeAbort = abort
+    const update = (fn: (m: AgentMessage) => AgentMessage) => set((s) => withMessage(s, runSessionId, agentMsgId, fn))
 
-    let currentIter = 1
-    let tokens = 0
-
+    let endStep: TraceStep | undefined
     try {
       const res = await fetch("/api/agent", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
@@ -266,136 +288,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           presentation: config.presentation,
           approvalMode: config.approvalMode,
           modelTier: config.modelTier,
-          nexumSessionId: currentSession?.nexumSessionId,
+          nexumSessionId: session?.nexumSessionId,
         }),
       })
       if (!res.ok || !res.body) throw new Error(`API error (${res.status}): ${await res.text()}`)
 
-      // When routed through Nexum (the default; not in legacy mode), the server hands
-      // back the session it ran this turn against — persist it so the next
-      // turn in this chat reuses the same Nexum session instead of minting
-      // a fresh one (route.ts's X-Nexum-Session-Id header).
-      const nexumSessionIdFromResponse = res.headers.get("X-Nexum-Session-Id")
-      if (nexumSessionIdFromResponse && nexumSessionIdFromResponse !== currentSession?.nexumSessionId) {
-        set((s) => {
-          const updated = s.sessions.map((sess) =>
-            sess.id === activeSessionId ? { ...sess, nexumSessionId: nexumSessionIdFromResponse } : sess,
-          )
-          if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-          return { sessions: updated }
-        })
+      // The route hands back the Nexum session this turn ran against; the next turn in this chat reuses it.
+      const nexumSessionId = res.headers.get("X-Nexum-Session-Id") ?? undefined
+      if (nexumSessionId) set((s) => withSession(s, runSessionId, (sess) => ({ ...sess, nexumSessionId })))
+
+      for await (const event of readWireEvents(res.body)) {
+        if (event.kind === "run") set({ activeRunId: event.runId as string })
+        else update((m) => applyWireEvent(m, event))
       }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n\n")
-        buffer = lines.pop() || ""
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith("data:")) continue
-          const rawData = trimmed.slice(5).trim()
-          if (rawData === "[DONE]") break
-
-          try {
-            const parsed = JSON.parse(rawData)
-            if (parsed.kind === "run") {
-              set({ activeRunId: parsed.runId })
-              continue
-            }
-            if (parsed.kind === "interaction_resolved") {
-              set((s) => ({
-                messages: patchInteractionStep(s.messages, agentMsgId, (t) => t.interactionId === parsed.interactionId, {
-                  status: "completed",
-                  finishedAt: Date.now(),
-                  resolution: parsed.resolution,
-                  error: undefined,
-                }),
-              }))
-              continue
-            }
-            if (parsed.kind === "usage") {
-              tokens += parsed.tokensIn + parsed.tokensOut
-              set((s) => ({
-                messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, model: parsed.model, totalTokens: tokens } : m)),
-              }))
-              continue
-            }
-            if (parsed.kind === "answer_delta" || parsed.kind === "thinking_delta") {
-              const field = parsed.kind === "answer_delta" ? "draftAnswer" : "draftThinking"
-              set((s) => ({
-                messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, [field]: (m[field] ?? "") + parsed.content } : m)),
-              }))
-              continue
-            }
-            currentIter = parsed.iteration || currentIter
-            tokens += (parsed.tokensIn || 0) + (parsed.tokensOut || 0)
-
-            set((s) => {
-              const msgs = s.messages.map((m) => {
-                if (m.id !== agentMsgId) return m
-                const stepId = `step_${m.trace?.length || 0}_${Date.now()}`
-                const newStep: TraceStep = {
-                  id: stepId,
-                  kind: parsed.kind,
-                  status: "completed",
-                  iteration: parsed.iteration || currentIter,
-                  startedAt: Date.now(),
-                  finishedAt: Date.now(),
-                  ...parsed,
-                }
-                const nextTrace = [...(m.trace || []), newStep]
-                return {
-                  ...m,
-                  // The final event supersedes its draft; text streamed before a tool call was narration.
-                  draftThinking: parsed.kind === "thinking" ? undefined : m.draftThinking,
-                  draftAnswer: parsed.kind === "tool_call" || parsed.kind === "answer" ? undefined : m.draftAnswer,
-                  trace: nextTrace,
-                  iterations: currentIter,
-                  totalTokens: tokens,
-                }
-              })
-              return { messages: msgs }
-            })
-          } catch {
-            // Ignore parse errors on chunks
-          }
-        }
-      }
-
-      set((s) => {
-        const msgs = closePendingInteractions(s.messages, agentMsgId).map((m) => (m.id === agentMsgId ? { ...m, status: "completed" as const, finishedAt: Date.now(), draftAnswer: undefined, draftThinking: undefined } : m))
-        const updated = s.sessions.map((sess) => (sess.id === s.activeSessionId ? { ...sess, title: sessionTitle, messages: msgs, updatedAt: Date.now() } : sess))
-        if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        return { messages: msgs, isRunning: false, activeMessageId: null, activeRunId: null, sessions: updated }
-      })
     } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err)
-      const stoppedByUser = abort.signal.aborted
-      set((s) => {
-        const msgs = closePendingInteractions(s.messages, agentMsgId).map((m) => {
-          if (m.id !== agentMsgId) return m
-          const endStep: TraceStep = {
-            id: `err_${Date.now()}`,
-            kind: "answer",
-            status: stoppedByUser ? "completed" : "error",
-            iteration: currentIter,
-            startedAt: Date.now(),
-            finishedAt: Date.now(),
-            content: stoppedByUser ? "⚠️ Run cancelled." : `⚠️ **Agent Execution Error**: ${errorMsg}`,
-          }
-          return { ...m, trace: [...(m.trace || []), endStep], status: stoppedByUser ? ("completed" as const) : ("error" as const), finishedAt: Date.now(), draftAnswer: undefined, draftThinking: undefined }
-        })
-        return { messages: msgs, isRunning: false, activeMessageId: null, activeRunId: null }
-      })
+      endStep = endStepFor(err, abort.signal.aborted)
     } finally {
       if (activeAbort === abort) activeAbort = null
     }
+
+    set((s) => {
+      const next = withMessage(s, runSessionId, agentMsgId, (m) => finishMessage(m, endStep))
+      persist(next.sessions)
+      return { ...next, isRunning: false, activeMessageId: null, activeRunId: null, activeRunSessionId: null }
+    })
+    // A failed turn is often an unreachable server: refresh the connection status the footer shows.
+    const finished = get().sessions.find((s) => s.id === runSessionId)?.messages.find((m) => m.id === agentMsgId)
+    if (finished?.status === "error") void get().loadCapabilities()
   },
 }))

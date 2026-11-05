@@ -68,6 +68,8 @@ export interface InteractionStep extends BaseStep {
   // approval
   title?: string
   summary?: string
+  /** What the action will write (file content or patch), when Nexum sends a preview. */
+  detail?: string
   // clarification
   question?: string
   options?: { id: string; label: string; description?: string }[]

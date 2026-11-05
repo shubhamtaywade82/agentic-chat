@@ -19,7 +19,9 @@ export function migrateStoredConfig(saved: string | null): { config: AgentConfig
     return { config: { ...DEFAULT_CONFIG }, rewrite: true }
   }
 
-  const approvalMode = APPROVAL_MODES.find((m) => m === stored.approvalMode) ?? DEFAULT_CONFIG.approvalMode
+  // YOLO is never restored: like a --yolo flag, it lasts until reload instead of silently carrying over.
+  const restorable = APPROVAL_MODES.filter((m) => m !== "yolo")
+  const approvalMode = restorable.find((m) => m === stored.approvalMode) ?? DEFAULT_CONFIG.approvalMode
   const modelTier = MODEL_TIERS.find((t) => t === stored.modelTier) ?? DEFAULT_CONFIG.modelTier
   const config: AgentConfig = { presentation: presentationOf(stored), approvalMode, modelTier }
   return { config, rewrite: saved !== JSON.stringify(config) }

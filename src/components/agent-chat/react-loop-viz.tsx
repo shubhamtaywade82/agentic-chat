@@ -5,7 +5,7 @@ import { Brain, Wrench, Eye, Sparkles, RotateCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TraceStep } from "@/lib/agent-types"
 
-type Phase = "idle" | "reason" | "act" | "observe" | "done"
+type Phase = "idle" | "reason" | "act" | "observe" | "wait" | "done"
 
 export function derivePhase(trace: TraceStep[] | undefined, running: boolean): Phase {
   if (!trace || trace.length === 0) return running ? "reason" : "idle"
@@ -20,6 +20,8 @@ export function derivePhase(trace: TraceStep[] | undefined, running: boolean): P
         return "act"
       case "observation":
         return "observe"
+      case "interaction":
+        return last.status === "completed" ? "reason" : "wait"
       case "answer":
         return "done"
     }
@@ -28,7 +30,7 @@ export function derivePhase(trace: TraceStep[] | undefined, running: boolean): P
   return "idle"
 }
 
-const PHASES: { key: Exclude<Phase, "idle" | "done">; label: string; icon: typeof Brain; color: string; text: string; glow: string }[] = [
+const PHASES: { key: Exclude<Phase, "idle" | "wait" | "done">; label: string; icon: typeof Brain; color: string; text: string; glow: string }[] = [
   { key: "reason", label: "Reason", icon: Brain, color: "#10b981", text: "text-emerald-600 dark:text-emerald-400", glow: "shadow-emerald-500/40" },
   { key: "act", label: "Act", icon: Wrench, color: "#f59e0b", text: "text-amber-600 dark:text-amber-400", glow: "shadow-amber-500/40" },
   { key: "observe", label: "Observe", icon: Eye, color: "#14b8a6", text: "text-teal-600 dark:text-teal-400", glow: "shadow-teal-500/40" },
@@ -142,7 +144,9 @@ export function ReactLoopViz({
 
       {/* legend / status text */}
       <div className="mt-2 flex items-center gap-1.5">
-        {isIdle ? (
+        {phase === "wait" ? (
+          <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Waiting for you</span>
+        ) : isIdle ? (
           <span className="text-[11px] text-muted-foreground">Idle</span>
         ) : isDone ? (
           <span className="text-[11px] font-medium text-foreground">Completed</span>

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import { buildNexumOpenUIOffer } from "@/lib/openui/prompt"
-import { NexumClient, NexumHttpError, type ApprovalMode, type CreateRunParams, type ModelTier, type PresentationMode } from "@/lib/nexum"
+import { NexumClient, NexumHttpError, describeNexumError, type ApprovalMode, type CreateRunParams, type ModelTier, type PresentationMode } from "@/lib/nexum"
 import { APPROVAL_MODES, MODEL_TIERS } from "@/lib/agent-types"
 import { createNexumSession, nexumHostUrl } from "@/lib/nexum-client"
 import { newTurnState, translateNexumEvent, type NexumEvent } from "@/lib/nexum/wire"
@@ -66,9 +66,19 @@ async function runViaNexum(
     }
   } catch (err: unknown) {
     if (signal.aborted) return
-    const message = err instanceof Error ? err.message : String(err)
-    send({ kind: "answer", iteration: state.iteration, content: `⚠️ **Agent Error** (Nexum host): ${message}` })
+    send({ kind: "answer", iteration: state.iteration, content: `⚠️ **Agent Error**: ${describeFailure(err, baseUrl)}`, error: true })
   }
+}
+
+function unreachable(baseUrl: string): string {
+  return `cannot reach Nexum at ${baseUrl} — is \`nexum serve\` running?`
+}
+
+// Connection failures name the server, not the internal session/run URL the request happened to hit.
+function describeFailure(err: unknown, baseUrl: string): string {
+  if (err instanceof NexumHttpError) return describeNexumError(err)
+  const message = err instanceof Error ? err.message : String(err)
+  return /failed to connect|fetch failed|ECONNREFUSED/i.test(message) ? unreachable(baseUrl) : message
 }
 
 export async function POST(req: NextRequest) {
@@ -125,7 +135,7 @@ export async function POST(req: NextRequest) {
         }
         await runViaNexum(send, nexumUrl, resolvedNexumSessionId, runParams, disconnected.signal)
       } else {
-        send({ kind: "answer", iteration: 1, content: `⚠️ **Agent Error**: could not reach Nexum at ${nexumUrl} — is \`nexum serve\` running?` })
+        send({ kind: "answer", iteration: 1, content: `⚠️ **Agent Error**: ${unreachable(nexumUrl)}`, error: true })
       }
       if (!closed) {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))

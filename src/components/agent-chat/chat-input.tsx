@@ -17,6 +17,7 @@ export function ChatInput() {
   const [text, setText] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { sendUserMessage, stopRun, isRunning } = useAgentStore()
+  const runningElsewhere = useAgentStore((s) => s.isRunning && s.activeRunSessionId !== s.activeSessionId)
 
   // auto-resize textarea
   useEffect(() => {
@@ -66,7 +67,8 @@ export function ChatInput() {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder={isRunning ? "Agent is working…" : "Ask the agent…"}
+            aria-label="Message to the agent"
+            placeholder={runningElsewhere ? "A turn is running in another chat…" : isRunning ? "Agent is working…" : "Ask the agent…"}
             disabled={isRunning}
             className="scroll-thin flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60"
           />

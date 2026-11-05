@@ -8,6 +8,7 @@ import { MessageSquare, PanelLeftClose, Plus, Trash2, X, Sliders, Search, Pencil
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { ConfirmAction } from "./confirm-action"
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const [sessionSearch, setSessionSearch] = useState("")
@@ -45,9 +46,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           </div>
         </div>
         {onClose ? (
-          <Button variant="ghost" size="icon" className="h-7 w-7 lg:hidden" onClick={onClose}><X className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 lg:hidden" onClick={onClose} aria-label="Close chat sessions"><X className="h-4 w-4" /></Button>
         ) : (
-          <Button variant="ghost" size="icon" className="hidden h-7 w-7 lg:flex" onClick={toggleSidebar} title="Collapse sidebar">
+          <Button variant="ghost" size="icon" className="hidden h-7 w-7 lg:flex" onClick={toggleSidebar} title="Collapse sidebar" aria-label="Collapse sidebar">
             <PanelLeftClose className="h-4 w-4" />
           </Button>
         )}
@@ -113,17 +114,26 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                           onClick={(e) => handleStartRename(s, e)}
                           className="hover:text-cyan-400 transition p-0.5 text-muted-foreground"
                           title="Rename chat"
+                          aria-label={`Rename chat ${s.title}`}
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
                         {sessions.length > 1 && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
-                            className="hover:text-destructive transition p-0.5 text-muted-foreground"
+                          <ConfirmAction
                             title="Delete chat"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
+                            description={`"${s.title}" and its history will be removed from this browser. This cannot be undone.`}
+                            onConfirm={() => deleteSession(s.id)}
+                            trigger={
+                              <button
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:text-destructive transition p-0.5 text-muted-foreground"
+                                title="Delete chat"
+                                aria-label={`Delete chat ${s.title}`}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            }
+                          />
                         )}
                       </div>
                     </>

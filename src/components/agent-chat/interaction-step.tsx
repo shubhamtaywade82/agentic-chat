@@ -21,6 +21,11 @@ export function InteractionBody({ step }: { step: InteractionStep }) {
         <>
           <p className="font-medium">{step.title}</p>
           <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{step.summary}</p>
+          {step.detail && (
+            <pre className="scroll-thin mt-2 max-h-64 overflow-auto rounded-md border border-border bg-muted/50 p-2 font-mono text-xs whitespace-pre-wrap">
+              {step.detail}
+            </pre>
+          )}
         </>
       ) : (
         <p className="font-medium">{step.question}</p>

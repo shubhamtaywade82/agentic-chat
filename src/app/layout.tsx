@@ -15,25 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ReAct Agent Playground — Visualize the Agentic Loop",
-  description: "An interactive chat interface that visualizes the agentic ReAct loop: thinking, reasoning, tool calls, observations, and final answers in real time.",
-  keywords: ["AI agent", "ReAct loop", "agentic chat", "tool calls", "reasoning", "Next.js", "TypeScript"],
-  authors: [{ name: "Z.ai Team" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
-  openGraph: {
-    title: "ReAct Agent Playground",
-    description: "Visualize the agentic Reason → Act → Observe loop in real time",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
-    type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "ReAct Agent Playground",
-    description: "Visualize the agentic Reason → Act → Observe loop in real time",
-  },
+  title: "Agentic Chat — Nexum agent client",
+  description: "Chat with a Nexum agent and watch its plans, tool calls, approvals and answers as they happen.",
 };
 
 export default function RootLayout({

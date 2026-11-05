@@ -9,16 +9,17 @@ import { ChatInput } from "./chat-input"
 import { Sidebar } from "./sidebar"
 import { AgentRuntimePanel } from "./agent-runtime-panel"
 import { NexumDialog } from "./nexum-dialog"
+import { ConfirmAction } from "./confirm-action"
 import { PRESENTATION_LABELS, PRESENTATION_MODES, serverSupportsOpenUI } from "@/lib/presentation"
-import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Zap, Settings, LineChart, LayoutDashboard, ShieldCheck, FilePen, ShieldAlert } from "lucide-react"
+import { Bot, PanelLeft, PanelLeftOpen, PanelRightOpen, Trash2, Settings, LineChart, LayoutDashboard, ShieldCheck, FilePen, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
-import { Badge } from "@/components/ui/badge"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { APPROVAL_MODES, DEFAULT_CONFIG } from "@/lib/agent-types"
 import { cn } from "@/lib/utils"
 
 const emptySubscribe = () => () => {}
+const CONNECTION_CHECK_MS = 30_000
 
 const APPROVAL_LABELS = {
   ask: { label: "Ask", icon: ShieldCheck, description: "Ask before file edits, deletes, destructive shell commands and publishing." },
@@ -61,6 +62,17 @@ export function AgentChat() {
     void loadCapabilities()
   }, [hydrateFromStorage, loadCapabilities])
 
+  // Keeps the connection status honest when the server goes away or comes back between turns.
+  useEffect(() => {
+    const refresh = () => void loadCapabilities()
+    const timer = window.setInterval(refresh, CONNECTION_CHECK_MS)
+    window.addEventListener("focus", refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener("focus", refresh)
+    }
+  }, [loadCapabilities])
+
   // auto-scroll to bottom on new content
   useEffect(() => {
     const el = scrollRef.current
@@ -74,7 +86,7 @@ export function AgentChat() {
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-9 w-9 lg:hidden">
+            <Button variant="ghost" size="icon" className="h-9 w-9 lg:hidden" aria-label="Open chat sessions">
               <PanelLeft className="h-4 w-4" />
             </Button>
           </SheetTrigger>
@@ -88,7 +100,7 @@ export function AgentChat() {
         </Sheet>
 
         {sidebarCollapsed && (
-          <Button variant="ghost" size="icon" className="hidden h-9 w-9 lg:flex" onClick={toggleSidebar} title="Expand sidebar">
+          <Button variant="ghost" size="icon" className="hidden h-9 w-9 lg:flex" onClick={toggleSidebar} title="Expand sidebar" aria-label="Expand sidebar">
             <PanelLeftOpen className="h-4 w-4" />
           </Button>
         )}
@@ -98,9 +110,9 @@ export function AgentChat() {
             <Bot className="h-4 w-4" />
           </div>
           <div className="leading-tight">
-            <h1 className="text-sm font-semibold">ReAct Agent Playground</h1>
+            <h1 className="text-sm font-semibold">Agentic Chat</h1>
             <p className="hidden text-[10px] text-muted-foreground sm:block">
-              Live ReAct loop visualization · Reason · Act · Observe
+              Nexum agent client · Reason · Act · Observe
             </p>
           </div>
         </div>
@@ -147,10 +159,6 @@ export function AgentChat() {
             <span>{approval.label}</span>
           </Button>
 
-          <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
-            <Zap className="h-2.5 w-2.5" /> Real LLM
-          </Badge>
-
           {/* Settings Backdrop Trigger in Header */}
           <NexumDialog
             trigger={
@@ -165,15 +173,22 @@ export function AgentChat() {
           <ThemeToggle />
 
           {rightPanelCollapsed && (
-            <Button variant="ghost" size="icon" className="hidden h-7 w-7 xl:flex" onClick={toggleRightPanel} title="Expand Agent Runtime panel">
+            <Button variant="ghost" size="icon" className="hidden h-7 w-7 xl:flex" onClick={toggleRightPanel} title="Expand Agent Runtime panel" aria-label="Expand Agent Runtime panel">
               <PanelRightOpen className="h-4 w-4" />
             </Button>
           )}
 
           {messages.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={clear} className="h-7 gap-1 px-2 text-[10px] text-muted-foreground hover:text-destructive">
-              <Trash2 className="h-3 w-3" /> Clear
-            </Button>
+            <ConfirmAction
+              title="Clear chat"
+              description="Removes this chat's messages and starts a fresh agent session, so the agent forgets them too. A running turn is stopped."
+              onConfirm={clear}
+              trigger={
+                <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[10px] text-muted-foreground hover:text-destructive">
+                  <Trash2 className="h-3 w-3" /> Clear
+                </Button>
+              }
+            />
           )}
         </div>
       </header>

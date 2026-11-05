@@ -8,10 +8,16 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 export function AgentRuntimePanel() {
-  const { messages, isRunning, activeMessageId, capabilities, capabilitiesError, toggleRightPanel } = useAgentStore()
+  const { messages, sessions, isRunning, activeMessageId, activeRunSessionId, capabilities, capabilitiesError, toggleRightPanel } =
+    useAgentStore()
 
-  const activeMsg = messages.find((m) => m.id === activeMessageId) ?? (isRunning ? undefined : [...messages].reverse().find((m) => m.role === "agent"))
+  // The running turn may belong to another chat than the open one; the loop follows the run, not the view.
+  const runMessages = sessions.find((s) => s.id === activeRunSessionId)?.messages ?? messages
+  const activeMsg = isRunning
+    ? runMessages.find((m) => m.id === activeMessageId)
+    : [...messages].reverse().find((m) => m.role === "agent")
   const phase = derivePhase(activeMsg?.trace, isRunning)
+  const [shownTools, hiddenTools] = splitTools(capabilities)
   const iteration = activeMsg?.iterations ?? 0
 
   const stats = {
@@ -37,7 +43,7 @@ export function AgentRuntimePanel() {
             </p>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="hidden h-7 w-7 xl:flex" onClick={toggleRightPanel} title="Collapse Agent Runtime panel">
+        <Button variant="ghost" size="icon" className="hidden h-7 w-7 xl:flex" onClick={toggleRightPanel} title="Collapse Agent Runtime panel" aria-label="Collapse Agent Runtime panel">
           <PanelRightClose className="h-4 w-4" />
         </Button>
       </div>
@@ -50,14 +56,16 @@ export function AgentRuntimePanel() {
             <div className="flex items-center justify-between mb-1.5">
               <SectionLabel>ReAct Loop Visualizer</SectionLabel>
               <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
-                {isRunning ? "cycling" : "standby"}
+                {phase === "wait" ? "waiting" : isRunning ? "running" : phase === "done" ? "done" : "idle"}
               </Badge>
             </div>
             <div className="flex justify-center rounded-xl border border-border bg-background/60 p-3 shadow-inner">
               <ReactLoopViz phase={phase} iteration={iteration} />
             </div>
             <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
-              {isRunning
+              {phase === "wait"
+                ? "The run is paused until you answer the prompt in the chat."
+                : isRunning
                 ? "Agent is iterating through Reason → Act → Observe cycles."
                 : phase === "done"
                 ? "Agent completed ReAct cycle with a final answer."
@@ -93,7 +101,7 @@ export function AgentRuntimePanel() {
             {capabilitiesError && <p className="text-[10px] text-destructive">{capabilitiesError}</p>}
             {capabilities && (
               <div className="flex flex-wrap gap-1">
-                {capabilities.tools.map((t) => (
+                {shownTools.map((t) => (
                   <span
                     key={t.id}
                     title={`${t.description}\nrisk: ${t.risk}${t.uiInvocable ? " · callable from generated UI" : ""}`}
@@ -116,6 +124,11 @@ export function AgentRuntimePanel() {
                     mcp:{s.name}
                   </span>
                 ))}
+                {hiddenTools > 0 && (
+                  <span className="px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+                    +{hiddenTools} more — see Nexum capabilities
+                  </span>
+                )}
               </div>
             )}
           </section>
@@ -123,6 +136,14 @@ export function AgentRuntimePanel() {
       </div>
     </div>
   )
+}
+
+// Every tool as a chip is a wall of 100+ names; a sample says what kind of server this is, the dialog lists all.
+const TOOL_CHIP_LIMIT = 12
+
+function splitTools(capabilities: { tools: { id: string; description: string; risk: string; uiInvocable?: boolean }[] } | null) {
+  const tools = capabilities?.tools ?? []
+  return [tools.slice(0, TOOL_CHIP_LIMIT), Math.max(0, tools.length - TOOL_CHIP_LIMIT)] as const
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {

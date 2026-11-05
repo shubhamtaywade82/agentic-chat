@@ -8,6 +8,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism"
 import { Check, Copy, AlertTriangle, ZoomIn, ZoomOut, RotateCcw, Code2, Eye } from "lucide-react"
 import { useState, useMemo, useEffect, useId } from "react"
+import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import "katex/dist/katex.min.css"
 
@@ -231,6 +232,7 @@ function MermaidBlock({ chart }: { chart: string }) {
   const [zoom, setZoom] = useState(1)
   const [copied, setCopied] = useState(false)
   const normalized = useMemo(() => normalizeMermaid(chart), [chart])
+  const { resolvedTheme } = useTheme()
 
   // Renders into state (not a ref's innerHTML) so the SVG survives the
   // Preview/Code toggle unmounting the preview container — a ref write only
@@ -242,8 +244,7 @@ function MermaidBlock({ chart }: { chart: string }) {
     import("mermaid").then(async ({ default: mermaid }) => {
       if (cancelled) return
       try {
-        const isDark = document.documentElement.classList.contains("dark")
-        mermaid.initialize({ startOnLoad: false, theme: isDark ? "dark" : "default", securityLevel: "strict" })
+        mermaid.initialize({ startOnLoad: false, theme: resolvedTheme === "dark" ? "dark" : "default", securityLevel: "strict" })
         const { svg: rendered } = await mermaid.render(`mermaid-${rawId}`, normalized)
         if (!cancelled) setSvg(rendered)
       } catch (err) {
@@ -254,7 +255,7 @@ function MermaidBlock({ chart }: { chart: string }) {
     return () => {
       cancelled = true
     }
-  }, [normalized, rawId])
+  }, [normalized, rawId, resolvedTheme])
 
   const copy = () => {
     navigator.clipboard.writeText(chart)
@@ -318,7 +319,7 @@ function MermaidBlock({ chart }: { chart: string }) {
           {chart}
         </SyntaxHighlighter>
       ) : (
-        <div className="max-h-[600px] min-h-[200px] overflow-auto bg-card/40 p-4">
+        <div className="max-h-[600px] min-h-[200px] overflow-auto bg-card p-4">
           <div
             className="mx-auto w-full origin-top transition-transform duration-150 [&>svg]:h-auto [&>svg]:w-full [&>svg]:max-w-none"
             style={{ transform: `scale(${zoom})` }}

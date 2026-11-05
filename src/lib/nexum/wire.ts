@@ -64,6 +64,7 @@ export function translateNexumEvent(event: NexumEvent, state: TurnState): WireEv
           interactionId: e.interactionId,
           title: e.title,
           summary: e.summary,
+          detail: e.detail,
         },
       ]
     case "run.clarification.required":
@@ -87,11 +88,11 @@ export function translateNexumEvent(event: NexumEvent, state: TurnState): WireEv
       return [{ kind: "answer", iteration: state.iteration, content: output.content, format: output.format }]
     }
     case "run.failed":
-      return [answer(state, `⚠️ **Agent Error**: ${e.error}`)]
+      return [{ ...answer(state, `⚠️ **Agent Error**: ${e.error}`), error: true }]
     case "run.cancelled":
       return [answer(state, "⚠️ Run cancelled.")]
     case "run.interrupted":
-      return [answer(state, `⚠️ **Run Interrupted**: ${e.reason}`)]
+      return [{ ...answer(state, `⚠️ **Run Interrupted**: ${e.reason}`), error: true }]
     default:
       return []
   }
