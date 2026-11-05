@@ -1,6 +1,6 @@
 // Core types for chat sessions and the run trace the UI renders
 
-import type { ApprovalMode, PresentationMode } from "@/lib/nexum"
+import type { ApprovalMode, ModelTier, PresentationMode } from "@/lib/nexum"
 
 export type StepStatus = "pending" | "running" | "completed" | "error"
 
@@ -97,6 +97,8 @@ export interface AgentMessage {
   totalTokens?: number
   iterations?: number
   /** Live preview of the answer / reasoning while the model is still writing; replaced by the final steps. */
+  /** The model that answered the latest model call of this turn. */
+  model?: string
   draftAnswer?: string
   draftThinking?: string
 }
@@ -110,9 +112,11 @@ export interface AgentConfig {
   presentation: PresentationMode
   /** Which confirmations the agent may skip; see ApprovalMode. */
   approvalMode: ApprovalMode
+  modelTier: ModelTier
 }
 
 export const APPROVAL_MODES: readonly ApprovalMode[] = ["ask", "auto-edit", "yolo"]
+export const MODEL_TIERS: readonly ModelTier[] = ["auto", "primary"]
 
 export interface ChatSession {
   id: string
@@ -128,4 +132,5 @@ export interface ChatSession {
 export const DEFAULT_CONFIG: AgentConfig = {
   presentation: "auto",
   approvalMode: "ask",
+  modelTier: "auto",
 }

@@ -8,11 +8,16 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { useAgentStore } from "@/store/agent-store"
 import { PRESENTATION_LABELS, PRESENTATION_MODES, serverSupportsOpenUI } from "@/lib/presentation"
-import type { PresentationMode } from "@/lib/nexum"
+import type { ModelTier, PresentationMode } from "@/lib/nexum"
+
+const MODEL_TIER_OPTIONS: { tier: ModelTier; label: string; description: string }[] = [
+  { tier: "auto", label: "Auto", description: "Try the quick local model first; escalate to the primary model when needed." },
+  { tier: "primary", label: "Primary only", description: "Send every turn straight to the server's configured model (e.g. a cloud model)." },
+]
 
 /**
- * What the connected Nexum server offers, plus the one client-side preference
- * (OpenUI). Model, tools, credentials and MCP are configured on the server.
+ * What the connected Nexum server offers, plus the client-side preferences
+ * (OpenUI, model tier). Models, tools, credentials and MCP are configured on the server.
  */
 export function NexumDialog({ trigger }: { trigger: React.ReactNode }) {
   const [open, setOpen] = useState(false)
@@ -68,6 +73,25 @@ export function NexumDialog({ trigger }: { trigger: React.ReactNode }) {
                       <span>
                         <span className="font-medium">{PRESENTATION_LABELS[mode].label}</span>
                         <span className="block text-muted-foreground">{PRESENTATION_LABELS[mode].description}</span>
+                      </span>
+                    </Label>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div className="mt-3 space-y-2 rounded-xl border border-border p-3">
+                <Label className="text-sm font-semibold">Model</Label>
+                <RadioGroup
+                  value={config.modelTier}
+                  onValueChange={(value) => updateConfig({ modelTier: value as ModelTier })}
+                  disabled={isRunning}
+                  className="gap-2 pt-1"
+                >
+                  {MODEL_TIER_OPTIONS.map(({ tier, label, description }) => (
+                    <Label key={tier} className="flex cursor-pointer items-start gap-2 text-xs font-normal">
+                      <RadioGroupItem value={tier} className="mt-0.5" />
+                      <span>
+                        <span className="font-medium">{label}</span>
+                        <span className="block text-muted-foreground">{description}</span>
                       </span>
                     </Label>
                   ))}

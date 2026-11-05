@@ -265,6 +265,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           query: text,
           presentation: config.presentation,
           approvalMode: config.approvalMode,
+          modelTier: config.modelTier,
           nexumSessionId: currentSession?.nexumSessionId,
         }),
       })
@@ -316,6 +317,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   resolution: parsed.resolution,
                   error: undefined,
                 }),
+              }))
+              continue
+            }
+            if (parsed.kind === "usage") {
+              tokens += parsed.tokensIn + parsed.tokensOut
+              set((s) => ({
+                messages: s.messages.map((m) => (m.id === agentMsgId ? { ...m, model: parsed.model, totalTokens: tokens } : m)),
               }))
               continue
             }

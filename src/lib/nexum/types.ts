@@ -55,6 +55,7 @@ export interface NexumRun {
 
 /** Which confirmations a run answers itself: none, workspace file edits, or everything (policy denials still apply). */
 export type ApprovalMode = "ask" | "auto-edit" | "yolo";
+export type ModelTier = "auto" | "primary";
 
 export interface CreateRunParams {
   goal: string;
@@ -63,6 +64,8 @@ export interface CreateRunParams {
   /** This client shows approvals/clarifications to the user; otherwise Nexum denies/skips them. */
   interactive?: boolean;
   approvalMode?: ApprovalMode;
+  /** "auto" tries the quick local model first; "primary" goes straight to the server's configured model. */
+  modelTier?: ModelTier;
   timeoutMs?: number;
 }
 

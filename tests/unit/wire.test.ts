@@ -81,7 +81,13 @@ describe("translateNexumEvent", () => {
     expect(translateNexumEvent({ type: "thought.delta", text: "hm" }, state)).toEqual([{ kind: "thinking_delta", content: "hm" }])
   })
 
+  it("should report the model and token counts of each model call", () => {
+    expect(translate({ type: "model.used", tier: "cloud", model: "m", promptTokens: 10, completionTokens: 5 })).toEqual([
+      { kind: "usage", model: "m", tokensIn: 10, tokensOut: 5 },
+    ])
+  })
+
   it("should ignore events with nothing to render", () => {
-    expect(translate({ type: "model.used", tier: "fast", model: "m" })).toEqual([])
+    expect(translate({ type: "checkpoint.saved" })).toEqual([])
   })
 })

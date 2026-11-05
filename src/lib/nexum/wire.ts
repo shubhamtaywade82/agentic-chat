@@ -39,6 +39,8 @@ export function translateNexumEvent(event: NexumEvent, state: TurnState): WireEv
       return [{ kind: "thinking_delta", content: e.text }]
     case "answer.delta":
       return [{ kind: "answer_delta", content: e.text }]
+    case "model.used":
+      return [{ kind: "usage", model: e.model, tokensIn: e.promptTokens ?? 0, tokensOut: e.completionTokens ?? 0 }]
     case "tool.started":
       state.toolIteration.set(e.callId, state.iteration)
       return [
@@ -91,7 +93,6 @@ export function translateNexumEvent(event: NexumEvent, state: TurnState): WireEv
     case "run.interrupted":
       return [answer(state, `⚠️ **Run Interrupted**: ${e.reason}`)]
     default:
-      // model.used has no matching trace step kind — nothing to render.
       return []
   }
 }

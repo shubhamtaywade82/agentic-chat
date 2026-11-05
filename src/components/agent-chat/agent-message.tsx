@@ -82,6 +82,7 @@ export function AgentMessageView({ message }: { message: AgentMessage }) {
                 <Repeat className="h-2.5 w-2.5" /> {message.iterations} {message.iterations === 1 ? "iter" : "iters"}
               </span>
             )}
+            {message.model && <span className="hidden sm:inline font-mono">{message.model}</span>}
             {message.totalTokens != null && message.totalTokens > 0 && (
               <span className="hidden sm:flex items-center gap-0.5 font-mono">
                 <Coins className="h-2.5 w-2.5" /> {message.totalTokens} tok
